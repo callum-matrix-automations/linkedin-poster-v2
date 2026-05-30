@@ -31,13 +31,27 @@ Do **not** set `PROXY_API_KEY` (the internal proxy is not gated).
 Railway injects `PORT` automatically; `next start` reads it. The proxy stays on
 42069 internally and ignores `PORT`.
 
+### Optional: `CLAUDE_OAUTH_TOKEN` (token-injection fallback)
+
+If you'd rather not browser-auth, set `CLAUDE_OAUTH_TOKEN` to a Claude OAuth
+bearer token (`sk-ant-oat01-...`, e.g. from `~/.claude/.credentials.json`). The
+app forwards it to the proxy as `x-api-key`, which the proxy uses directly as the
+upstream Claude credential, skipping the file-based OAuth entirely. Note: a raw
+injected token is **not refreshed**, so it expires in ~2-3 hours. Browser auth via
+Settings is preferred because the proxy then refreshes the token itself.
+
 ## First-run authentication
+
+The Settings page drives the **proxy's own** OAuth flow through a passthrough
+(`/proxy-auth/*` -> internal proxy `/auth/*`). The proxy holds the PKCE state in
+its long-lived process, so the login/callback pair always resolves correctly.
 
 1. Deploy. Wait for the build + start to finish.
 2. Open the app, go to **Settings**.
-3. Click to connect Claude, authorize on the Claude page, paste the
-   `code#state` value back, and submit.
-4. This writes the OAuth token to the shared token file; the proxy picks it up.
+3. Click "Open authorization page", approve access on Claude.
+4. Copy the full `code#state` string shown, paste it back in Settings, submit.
+5. The proxy exchanges it and writes the token to its own store; status flips
+   to Connected. The proxy auto-refreshes the token from here on.
 
 ## Caveat: ephemeral filesystem
 

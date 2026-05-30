@@ -20,7 +20,7 @@ export default function SettingsPage() {
     setLoading(true);
     setProxyDown(false);
     try {
-      const res = await fetch("/api/ai/auth/status");
+      const res = await fetch("/proxy-auth/auth/status");
       if (!res.ok) throw new Error("status failed");
       const data = await res.json();
       setStatus(data);
@@ -39,7 +39,7 @@ export default function SettingsPage() {
   async function handleStartLogin() {
     setError(null);
     try {
-      const res = await fetch("/api/ai/auth/login");
+      const res = await fetch("/proxy-auth/auth/get-url");
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Failed to start login");
@@ -57,8 +57,7 @@ export default function SettingsPage() {
     const raw = codeInput.trim();
     if (!raw) return;
 
-    const parts = raw.split("#");
-    if (parts.length !== 2) {
+    if (raw.split("#").length !== 2) {
       setError("Invalid code. Expected the full code#state string.");
       return;
     }
@@ -66,14 +65,14 @@ export default function SettingsPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch("/api/ai/auth/callback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: parts[0], state: parts[1] }),
-      });
+      // The proxy completes auth via GET /auth/callback?manual_code=code#state
+      const res = await fetch(
+        `/proxy-auth/auth/callback?manual_code=${encodeURIComponent(raw)}`,
+      );
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Authentication failed");
+        throw new Error(
+          "Authentication failed. The code may be expired. Start again.",
+        );
       }
       setCodeInput("");
       setAuthUrl(null);
