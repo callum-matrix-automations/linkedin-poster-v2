@@ -7,7 +7,7 @@
     "dev:next": "next dev",
     "dev:proxy": "node proxy/server.js",
     "build": "next build",
-    "start": "concurrently --kill-others-on-fail --names next,proxy --prefix-colors blue,yellow \"next start\" \"node proxy/server.js\"",
+    "start": "node proxy/seed-token.mjs && concurrently --kill-others-on-fail --names next,proxy --prefix-colors blue,yellow \"next start\" \"node proxy/server.js\"",
     "start:next": "next start",
     "start:proxy": "node proxy/server.js",
     "lint": "eslint"
