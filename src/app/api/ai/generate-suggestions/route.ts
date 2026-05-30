@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile, LinkedInPost, PostSuggestion } from "@/lib/types";
-
-import { proxyHeaders, proxyMessagesUrl } from "@/lib/proxy";
+import { chatCompletion } from "@/lib/openai";
 
 const SYSTEM_PROMPT = `You are a LinkedIn post strategist. Your job is to analyze high-performing LinkedIn posts and a user's profile to suggest post ideas that will resonate with their audience.
 
@@ -108,54 +107,31 @@ export async function POST(request: NextRequest) {
       `Generate ${count} post suggestions for this person. Remember: respond with ONLY a raw JSON array, no markdown fences.`,
     ].join("\n");
 
-    const resp = await fetch(proxyMessagesUrl(), {
-      method: "POST",
-      headers: proxyHeaders(),
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4096,
-        system: [{ type: "text", text: SYSTEM_PROMPT }],
-        messages: [{ role: "user", content: userMessage }],
-      }),
-    });
-
-    if (!resp.ok) {
-      const errorText = await resp.text();
-      return NextResponse.json(
-        { error: `AI request failed (${resp.status}): ${errorText}` },
-        { status: resp.status },
-      );
-    }
-
-    const data = await resp.json();
-
-    const textBlock = data.content?.find(
-      (b: { type: string }) => b.type === "text",
+    const text = await chatCompletion(
+      [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      4096,
     );
-    if (!textBlock?.text) {
-      return NextResponse.json(
-        { error: "No text response from AI" },
-        { status: 502 },
-      );
-    }
 
     let suggestions: PostSuggestion[];
     try {
-      const cleaned = textBlock.text
+      const cleaned = text
         .replace(/```json\s*/g, "")
         .replace(/```\s*/g, "")
         .trim();
       suggestions = JSON.parse(cleaned);
     } catch {
       return NextResponse.json(
-        { error: "Failed to parse AI response as JSON", raw: textBlock.text },
+        { error: "Failed to parse AI response as JSON", raw: text },
         { status: 502 },
       );
     }
 
     if (!Array.isArray(suggestions)) {
       return NextResponse.json(
-        { error: "AI response was not an array", raw: textBlock.text },
+        { error: "AI response was not an array", raw: text },
         { status: 502 },
       );
     }

@@ -3,17 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently --names next,proxy --prefix-colors blue,yellow \"next dev\" \"node proxy/server.js\"",
-    "dev:next": "next dev",
-    "dev:proxy": "node proxy/server.js",
+    "dev": "next dev",
     "build": "next build",
-    "start": "node proxy/seed-token.mjs && concurrently --kill-others-on-fail --names next,proxy --prefix-colors blue,yellow \"next start\" \"node proxy/server.js\"",
-    "start:next": "next start",
-    "start:proxy": "node proxy/server.js",
+    "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
-    "concurrently": "^10.0.0",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4"

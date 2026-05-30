@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import type { UserProfile } from "@/lib/types";
-import { proxyHeaders, proxyMessagesUrl } from "@/lib/proxy";
+import { chatCompletionStream } from "@/lib/openai";
 
 const SYSTEM_PROMPT = `You are an inline text editor for LinkedIn posts. You receive a selected portion of text from a LinkedIn post and an editing instruction. Your job is to transform ONLY the selected text according to the instruction while maintaining consistency with the full post's voice and tone.
 
@@ -81,17 +81,13 @@ export async function POST(request: NextRequest) {
       "Return ONLY the replacement text.",
     ].join("\n");
 
-    const resp = await fetch(proxyMessagesUrl(), {
-      method: "POST",
-      headers: proxyHeaders(),
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2048,
-        stream: true,
-        system: [{ type: "text", text: SYSTEM_PROMPT }],
-        messages: [{ role: "user", content: userMessage }],
-      }),
-    });
+    const resp = await chatCompletionStream(
+      [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      2048,
+    );
 
     if (!resp.ok) {
       const errorText = await resp.text();
@@ -126,20 +122,19 @@ export async function POST(request: NextRequest) {
               if (!line.startsWith("data: ")) continue;
               const dataStr = line.slice(6).trim();
               if (!dataStr) continue;
+              if (dataStr === "[DONE]") {
+                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                continue;
+              }
 
               try {
+                // OpenAI SSE: { choices: [{ delta: { content } }] }
                 const event = JSON.parse(dataStr);
-                if (
-                  event.type === "content_block_delta" &&
-                  event.delta?.type === "text_delta" &&
-                  event.delta.text
-                ) {
+                const text = event.choices?.[0]?.delta?.content;
+                if (text) {
                   controller.enqueue(
-                    encoder.encode(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`),
+                    encoder.encode(`data: ${JSON.stringify({ text })}\n\n`),
                   );
-                }
-                if (event.type === "message_stop") {
-                  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                 }
               } catch {
                 // skip unparseable lines

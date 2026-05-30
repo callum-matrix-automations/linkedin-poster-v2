@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile, LinkedInPost, PostSuggestion } from "@/lib/types";
-import { proxyHeaders, proxyMessagesUrl } from "@/lib/proxy";
+import { chatCompletion } from "@/lib/openai";
 
 const SYSTEM_PROMPT = `You are a LinkedIn ghostwriter. You write posts that sound like they were written by the person, not by AI. Your job is to take a post idea and turn it into a compelling LinkedIn post.
 
@@ -104,38 +104,15 @@ export async function POST(request: NextRequest) {
       "Write the post now. Raw text only, no commentary.",
     ].join("\n");
 
-    const resp = await fetch(proxyMessagesUrl(), {
-      method: "POST",
-      headers: proxyHeaders(),
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4096,
-        system: [{ type: "text", text: SYSTEM_PROMPT }],
-        messages: [{ role: "user", content: userMessage }],
-      }),
-    });
-
-    if (!resp.ok) {
-      const errorText = await resp.text();
-      return NextResponse.json(
-        { error: `AI request failed (${resp.status}): ${errorText}` },
-        { status: resp.status },
-      );
-    }
-
-    const data = await resp.json();
-
-    const textBlock = data.content?.find(
-      (b: { type: string }) => b.type === "text",
+    const draft = await chatCompletion(
+      [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      4096,
     );
-    if (!textBlock?.text) {
-      return NextResponse.json(
-        { error: "No text response from AI" },
-        { status: 502 },
-      );
-    }
 
-    return NextResponse.json({ draft: textBlock.text.trim() });
+    return NextResponse.json({ draft });
   } catch (err) {
     return NextResponse.json(
       {
