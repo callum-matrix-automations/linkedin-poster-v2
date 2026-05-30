@@ -7,10 +7,13 @@
     "dev:next": "next dev",
     "dev:proxy": "node proxy/server.js",
     "build": "next build",
-    "start": "next start",
+    "start": "concurrently --kill-others-on-fail --names next,proxy --prefix-colors blue,yellow \"next start\" \"node proxy/server.js\"",
+    "start:next": "next start",
+    "start:proxy": "node proxy/server.js",
     "lint": "eslint"
   },
   "dependencies": {
+    "concurrently": "^10.0.0",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4"
@@ -20,7 +23,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "concurrently": "^10.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",

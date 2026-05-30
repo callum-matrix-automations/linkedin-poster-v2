@@ -1,6 +1,6 @@
 port=42069
-host=                            # Leave blank for auto-detect (127.0.0.1 native, 0.0.0.0 Docker)
+host=127.0.0.1                   # Internal only: reachable from Next.js in the same container, not exposed publicly
 log_level=INFO                   # TRACE, DEBUG, INFO, WARN, ERROR
 filter_sampling_params=false     # Set to true to resolve temperature/top_p conflicts for older models
 fallback_to_claude_code=true     # Use Claude Code credentials as fallback if OAuth tokens not found
-auto_open_browser=true           # Open browser automatically on first run when not authenticated
+auto_open_browser=false          # No browser in a container; auth via the app's /settings page
