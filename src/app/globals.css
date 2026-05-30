@@ -1,26 +1,130 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Warm charcoal neutrals (Elevateo near-black) */
+  --chrome: oklch(16% 0.008 80);
+  --chrome-light: oklch(21% 0.009 80);
+  --chrome-border: oklch(30% 0.01 80);
+  --chrome-text: oklch(68% 0.012 80);
+  --chrome-text-strong: oklch(93% 0.015 85);
+
+  /* Light surfaces (LinkedIn preview stays accurate; these are for warm panels) */
+  --surface: oklch(97.5% 0.003 80);
+  --surface-dim: oklch(94% 0.005 80);
+  --surface-text: oklch(18% 0.008 80);
+  --surface-text-secondary: oklch(45% 0.008 80);
+
+  /* Elevateo gold accent */
+  --accent: oklch(80% 0.13 86);
+  --accent-hover: oklch(74% 0.14 84);
+  --accent-text: oklch(20% 0.02 80);
+  --accent-deep: oklch(62% 0.11 78);
+  --accent-bright: oklch(90% 0.09 92);
+
+  /* Gold gradient (logo, premium surfaces) */
+  --gold-gradient: linear-gradient(
+    135deg,
+    oklch(62% 0.11 78) 0%,
+    oklch(82% 0.13 86) 45%,
+    oklch(92% 0.08 92) 100%
+  );
+
+  --error: oklch(62% 0.19 28);
+  --success: oklch(72% 0.14 150);
+
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-chrome: var(--chrome);
+  --color-chrome-light: var(--chrome-light);
+  --color-chrome-border: var(--chrome-border);
+  --color-chrome-text: var(--chrome-text);
+  --color-chrome-text-strong: var(--chrome-text-strong);
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-text: var(--surface-text);
+  --color-surface-text-secondary: var(--surface-text-secondary);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
+  --color-accent-deep: var(--accent-deep);
+  --color-accent-bright: var(--accent-bright);
+  --color-error: var(--error);
+  --color-success: var(--success);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: oklch(80% 0.13 86 / 0.28);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: oklch(50% 0.01 80);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+select option {
+  background: oklch(21% 0.009 80);
+  color: oklch(93% 0.015 85);
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.inline-toolbar-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 10px;
+  height: 10px;
+  background: oklch(21% 0.009 80 / 0.95);
+  border-right: 1px solid var(--chrome-border);
+  border-bottom: 1px solid var(--chrome-border);
+}
+
+.post-editor:empty::before {
+  content: attr(data-placeholder);
+  color: oklch(45% 0.01 80);
+  pointer-events: none;
+}
+
+.post-editor > div:first-child {
+  font-size: 17px;
+  font-weight: 600;
+  color: oklch(96% 0.015 85);
+}
+
+/* Gold gradient text utility for the brand wordmark */
+.gold-text {
+  background: var(--gold-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }

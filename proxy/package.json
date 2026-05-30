@@ -1,0 +1,10 @@
+{
+  "name": "claude-code-proxy",
+  "version": "1.0.0",
+  "description": "Claude API proxy with OAuth authentication and OpenAI-compatible endpoints",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}

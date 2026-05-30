@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# brand source assets (503MB; used logos are copied into public/brand/)
+/elevateo_branding
