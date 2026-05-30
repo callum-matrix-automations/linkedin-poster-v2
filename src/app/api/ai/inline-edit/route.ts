@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import type { UserProfile } from "@/lib/types";
-
-const PROXY_URL = process.env.PROXY_URL || "http://localhost:42069";
+import { proxyHeaders, proxyMessagesUrl } from "@/lib/proxy";
 
 const SYSTEM_PROMPT = `You are an inline text editor for LinkedIn posts. You receive a selected portion of text from a LinkedIn post and an editing instruction. Your job is to transform ONLY the selected text according to the instruction while maintaining consistency with the full post's voice and tone.
 
@@ -82,9 +81,9 @@ export async function POST(request: NextRequest) {
       "Return ONLY the replacement text.",
     ].join("\n");
 
-    const resp = await fetch(`${PROXY_URL}/v1/messages`, {
+    const resp = await fetch(proxyMessagesUrl(), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: proxyHeaders(),
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 2048,

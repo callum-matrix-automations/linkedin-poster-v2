@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const PROXY_URL = process.env.PROXY_URL || "http://localhost:42069";
+import { proxyHeaders, proxyMessagesUrl } from "@/lib/proxy";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const resp = await fetch(`${PROXY_URL}/v1/messages`, {
+    const resp = await fetch(proxyMessagesUrl(), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: proxyHeaders(),
       body: JSON.stringify(body),
     });
 

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile, LinkedInPost, PostSuggestion } from "@/lib/types";
-
-const PROXY_URL = process.env.PROXY_URL || "http://localhost:42069";
+import { proxyHeaders, proxyMessagesUrl } from "@/lib/proxy";
 
 const SYSTEM_PROMPT = `You are a LinkedIn ghostwriter. You write posts that sound like they were written by the person, not by AI. Your job is to take a post idea and turn it into a compelling LinkedIn post.
 
@@ -105,9 +104,9 @@ export async function POST(request: NextRequest) {
       "Write the post now. Raw text only, no commentary.",
     ].join("\n");
 
-    const resp = await fetch(`${PROXY_URL}/v1/messages`, {
+    const resp = await fetch(proxyMessagesUrl(), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: proxyHeaders(),
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 4096,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile, LinkedInPost, PostSuggestion } from "@/lib/types";
 
-const PROXY_URL = process.env.PROXY_URL || "http://localhost:42069";
+import { proxyHeaders, proxyMessagesUrl } from "@/lib/proxy";
 
 const SYSTEM_PROMPT = `You are a LinkedIn post strategist. Your job is to analyze high-performing LinkedIn posts and a user's profile to suggest post ideas that will resonate with their audience.
 
@@ -108,9 +108,9 @@ export async function POST(request: NextRequest) {
       `Generate ${count} post suggestions for this person. Remember: respond with ONLY a raw JSON array, no markdown fences.`,
     ].join("\n");
 
-    const resp = await fetch(`${PROXY_URL}/v1/messages`, {
+    const resp = await fetch(proxyMessagesUrl(), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: proxyHeaders(),
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 4096,
