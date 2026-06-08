@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getProfile, saveProfile } from "@/lib/storage";
+import { useState } from "react";
+import { useProfile } from "@/components/app-data-provider";
 import { OnboardingInput, ChipSelect } from "@/components/onboarding-input";
+import { ProfileSkeleton } from "@/components/skeleton";
 import { EMPTY_PROFILE } from "@/lib/types";
 import type { UserProfile } from "@/lib/types";
 
@@ -70,17 +71,20 @@ const FIELDS: {
 ];
 
 export default function ProfilePage() {
+  const { profile: cachedProfile, loading, saveProfile } = useProfile();
+  // Local editable copy, seeded from the cache once it arrives. We track the
+  // exact source object we seeded from and re-seed during render (a React-
+  // sanctioned pattern) when the cache first resolves — no effect needed.
   const [profile, setProfile] = useState<UserProfile>(EMPTY_PROFILE);
-  const [mounted, setMounted] = useState(false);
+  const [seededFrom, setSeededFrom] = useState<UserProfile | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    getProfile().then((p) => {
-      setProfile(p);
-      setMounted(true);
-    });
-  }, []);
+  const seeded = seededFrom !== null;
+  if (cachedProfile && cachedProfile !== seededFrom) {
+    setProfile(cachedProfile);
+    setSeededFrom(cachedProfile);
+  }
 
   function update(key: keyof UserProfile, value: string) {
     setProfile((prev) => ({ ...prev, [key]: value }));
@@ -99,7 +103,7 @@ export default function ProfilePage() {
     }
   }
 
-  if (!mounted) return <div className="min-h-dvh bg-chrome" />;
+  if (loading && !seeded) return <ProfileSkeleton />;
 
   return (
     <div className="min-h-dvh bg-chrome px-6 py-12">

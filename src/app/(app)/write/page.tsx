@@ -3,21 +3,27 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  getProfile,
   getDraft,
   updateDraftContent,
   finishDraft,
-  getDrafts,
-  getHistory,
   deleteDraft,
 } from "@/lib/storage";
+import {
+  useProfile,
+  useDrafts,
+  useHistory,
+} from "@/components/app-data-provider";
 import { LinkedInPreview } from "@/components/linkedin-preview";
 import { PostEditor } from "@/components/post-editor";
 import { PostCard } from "@/components/post-card";
-import type { PostSuggestion, LinkedInPost, SavedDraft } from "@/lib/types";
+import { PostEditorSkeleton, DraftListSkeleton } from "@/components/skeleton";
+import type { PostSuggestion, LinkedInPost, SavedDraft, UserProfile } from "@/lib/types";
 
 function WriteEditor({ draftId }: { draftId: string }) {
   const router = useRouter();
+  const { profile } = useProfile();
+  const { refresh: refreshDrafts } = useDrafts();
+  const { refresh: refreshHistory } = useHistory();
   const [mounted, setMounted] = useState(false);
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
@@ -27,22 +33,23 @@ function WriteEditor({ draftId }: { draftId: string }) {
   const [tab, setTab] = useState<"editor" | "inspiration">("editor");
   const [copied, setCopied] = useState(false);
   const [finished, setFinished] = useState(false);
-  const [authorName, setAuthorName] = useState("");
-  const [authorTitle, setAuthorTitle] = useState("");
+  // Author identity comes from the cached profile; falls back to empty until loaded.
+  const authorName = profile?.name ?? "";
+  const authorTitle = profile?.title ?? "";
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // Wait for the cached profile before loading the draft — generation needs it.
+    if (!profile) return;
     let cancelled = false;
     (async () => {
-      const [draft, profile] = await Promise.all([getDraft(draftId), getProfile()]);
+      const draft = await getDraft(draftId);
       if (cancelled) return;
       if (!draft) {
         router.replace("/write");
         return;
       }
 
-      setAuthorName(profile.name);
-      setAuthorTitle(profile.title);
       setSuggestion(draft.suggestion);
       setInspirationPosts(draft.inspirationPosts ?? []);
       setFinished(draft.status === "finished");
@@ -59,10 +66,10 @@ function WriteEditor({ draftId }: { draftId: string }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftId, router]);
+  }, [draftId, router, profile]);
 
   async function generateDraft(
-    profile: Awaited<ReturnType<typeof getProfile>>,
+    profile: UserProfile,
     sugg: PostSuggestion,
     posts: LinkedInPost[],
   ) {
@@ -111,7 +118,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
   }, []);
 
   async function handleRegenerate() {
-    const profile = await getProfile();
+    if (!profile) return;
     setContent("");
     await generateDraft(profile, suggestion!, inspirationPosts);
   }
@@ -122,6 +129,9 @@ function WriteEditor({ draftId }: { draftId: string }) {
     await updateDraftContent(draftId, content);
     await finishDraft(draftId);
     setFinished(true);
+    // The draft moved drafting -> finished; refresh both lists so the cache
+    // reflects the move when we land back on the list.
+    await Promise.all([refreshDrafts(), refreshHistory()]);
     router.push("/write");
   }
 
@@ -143,7 +153,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
   }
 
   if (!mounted) {
-    return <div className="h-full bg-chrome" />;
+    return <PostEditorSkeleton />;
   }
 
   return (
@@ -321,24 +331,22 @@ function WriteEditor({ draftId }: { draftId: string }) {
 
 function DraftList() {
   const router = useRouter();
-  const [drafts, setDrafts] = useState<SavedDraft[]>([]);
-  const [history, setHistory] = useState<SavedDraft[]>([]);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    Promise.all([getDrafts(), getHistory()]).then(([d, h]) => {
-      setDrafts(d);
-      setHistory(h);
-      setMounted(true);
-    });
-  }, []);
+  const { drafts, loading: draftsLoading, removeFromCache } = useDrafts();
+  const { history, loading: historyLoading } = useHistory();
 
   async function handleDelete(id: string) {
+    // Optimistically drop from the cache, then persist.
+    removeFromCache(id);
     await deleteDraft(id);
-    setDrafts(await getDrafts());
   }
 
-  if (!mounted) return <div className="min-h-dvh bg-chrome" />;
+  // First load (no cached data yet) shows the ghost list.
+  if ((draftsLoading && drafts === null) || (historyLoading && history === null)) {
+    return <DraftListSkeleton />;
+  }
+
+  const draftList = drafts ?? [];
+  const historyList = history ?? [];
 
   return (
     <div className="min-h-dvh bg-chrome px-6 py-12">
@@ -356,7 +364,7 @@ function DraftList() {
           <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-chrome-text">
             In progress
           </h2>
-          {drafts.length === 0 ? (
+          {draftList.length === 0 ? (
             <div className="rounded-lg border border-dashed border-chrome-border px-6 py-10 text-center">
               <p className="mb-1 text-sm font-medium text-chrome-text-strong">
                 No drafts yet
@@ -375,7 +383,7 @@ function DraftList() {
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {drafts.map((d) => (
+              {draftList.map((d) => (
                 <DraftRow
                   key={d.id}
                   draft={d}
@@ -387,13 +395,13 @@ function DraftList() {
           )}
         </section>
 
-        {history.length > 0 && (
+        {historyList.length > 0 && (
           <section>
             <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-chrome-text">
               History
             </h2>
             <div className="flex flex-col gap-2">
-              {history.map((d) => (
+              {historyList.map((d) => (
                 <DraftRow
                   key={d.id}
                   draft={d}

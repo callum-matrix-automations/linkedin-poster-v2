@@ -2,10 +2,12 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { getProfile, saveSearch, getSavedSearch, createDraft } from "@/lib/storage";
+import { saveSearch, getSavedSearch, createDraft } from "@/lib/storage";
+import { useProfile, useDrafts } from "@/components/app-data-provider";
 import { clearCurrentDraft } from "@/lib/draft-store";
 import { PostCard } from "@/components/post-card";
 import { SuggestionCard } from "@/components/suggestion-card";
+import { EMPTY_PROFILE } from "@/lib/types";
 import type { LinkedInPost, PostSuggestion } from "@/lib/types";
 
 const TIME_OPTIONS = [
@@ -109,6 +111,8 @@ function TagInput({ label, values, onChange, placeholder }: {
 
 export default function FindPage() {
   const router = useRouter();
+  const { profile } = useProfile();
+  const { refresh: refreshDrafts } = useDrafts();
   const [queries, setQueries] = useState<string[]>([""]);
   const [allPosts, setAllPosts] = useState<LinkedInPost[]>([]);
   const [loading, setLoading] = useState(false);
@@ -226,11 +230,10 @@ export default function FindPage() {
   async function handleGenerateSuggestions() {
     setSuggestionsLoading(true); setSuggestionsError(null); setSuggestions([]);
     try {
-      const profile = await getProfile();
       const postsForAI = selectedPosts.length > 0 ? selectedPosts : filteredPosts.slice(0, 6);
       const res = await fetch("/api/ai/generate-suggestions", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile, posts: postsForAI, count: 6 }),
+        body: JSON.stringify({ profile: profile ?? EMPTY_PROFILE, posts: postsForAI, count: 6 }),
       });
       if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || `Request failed (${res.status})`); }
       const data = await res.json();
@@ -248,6 +251,8 @@ export default function FindPage() {
         selectedPosts.length > 0 ? selectedPosts : filteredPosts.slice(0, 6);
       const draft = await createDraft(suggestion, postsForContext);
       clearCurrentDraft();
+      // New draft won't be in the cached list — refresh it in the background.
+      void refreshDrafts();
       router.push(`/write?id=${draft.id}`);
     } catch {
       setCreatingDraft(false);
