@@ -20,7 +20,23 @@ import { PostEditorSkeleton, DraftListSkeleton } from "@/components/skeleton";
 import { ProviderSetupPrompt } from "@/components/provider-setup-prompt";
 import { LinkedInPublishDialog } from "@/components/linkedin-publish-dialog";
 import { getLinkedInStatus } from "@/lib/linkedin-client";
+import { EMPTY_PROFILE } from "@/lib/types";
 import type { PostSuggestion, LinkedInPost, SavedDraft, UserProfile } from "@/lib/types";
+
+/**
+ * Removes a trailing block of hashtags (a final paragraph that is only
+ * #hashtags) from a post, so regenerating hashtags replaces rather than stacks.
+ * Leaves inline hashtags within the body untouched.
+ */
+function stripTrailingHashtags(text: string): string {
+  // Work from the end: drop trailing whitespace, then peel off any run of
+  // lines that consist solely of hashtags (and whitespace between them).
+  const trimmed = text.replace(/\s+$/, "");
+  // Match a trailing block where the remaining tail is only #tags/whitespace.
+  const m = trimmed.match(/(?:^|\n)[ \t]*((?:#[A-Za-z0-9]+[ \t]*)+)$/);
+  if (!m) return text.replace(/\s+$/, "");
+  return trimmed.slice(0, m.index).replace(/\s+$/, "");
+}
 
 function WriteEditor({ draftId }: { draftId: string }) {
   const router = useRouter();
@@ -47,6 +63,10 @@ function WriteEditor({ draftId }: { draftId: string }) {
   // null = unknown/checking, true = connected & valid, false = needs (re)connect.
   const [linkedinReady, setLinkedinReady] = useState<boolean | null>(null);
   const [showPublish, setShowPublish] = useState(false);
+  // Hashtag agent state.
+  const [hashtagLoading, setHashtagLoading] = useState(false);
+  const [hashtagError, setHashtagError] = useState<string | null>(null);
+  const [hashtagSetupNeeded, setHashtagSetupNeeded] = useState(false);
   // Author identity comes from the cached profile; falls back to empty until loaded.
   const authorName = profile?.name ?? "";
   const authorTitle = profile?.title ?? "";
@@ -200,6 +220,40 @@ function WriteEditor({ draftId }: { draftId: string }) {
     }
   }
 
+  async function handleGenerateHashtags() {
+    if (hashtagLoading || !content.trim()) return;
+    setHashtagLoading(true);
+    setHashtagError(null);
+    setHashtagSetupNeeded(false);
+    try {
+      const res = await fetch("/api/ai/generate-hashtags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, profile: profile ?? EMPTY_PROFILE }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.code === "setup_required") setHashtagSetupNeeded(true);
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      const data = await res.json();
+      const tags: string[] = data.hashtags || [];
+      if (tags.length === 0) return;
+
+      // Replace any existing trailing hashtag block, then append the new one.
+      const base = stripTrailingHashtags(content);
+      const tagLine = tags.map((t) => `#${t}`).join(" ");
+      const next = `${base}\n\n${tagLine}`;
+      handleDraftChange(next);
+    } catch (err) {
+      setHashtagError(
+        err instanceof Error ? err.message : "Failed to generate hashtags",
+      );
+    } finally {
+      setHashtagLoading(false);
+    }
+  }
+
   function handlePostToLinkedIn() {
     if (!content) return;
     // If the live check says not connected/expired, send them to connect first.
@@ -278,6 +332,30 @@ function WriteEditor({ draftId }: { draftId: string }) {
           >
             {copied ? "Copied" : "Copy"}
           </button>
+
+          {/* Hashtag agent — hidden while a finished post is locked (read-only). */}
+          {!locked && (
+            <button
+              type="button"
+              onClick={handleGenerateHashtags}
+              disabled={!content || loading || hashtagLoading}
+              title="Generate and append relevant hashtags"
+              className="flex items-center gap-1.5 rounded-lg border border-chrome-border px-3 py-1.5 text-sm text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong disabled:opacity-30"
+              style={{ transitionDuration: "var(--duration-fast)" }}
+            >
+              {hashtagLoading ? (
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-chrome-border border-t-accent" />
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="4" y1="9" x2="20" y2="9" />
+                  <line x1="4" y1="15" x2="20" y2="15" />
+                  <line x1="10" y1="3" x2="8" y2="21" />
+                  <line x1="16" y1="3" x2="14" y2="21" />
+                </svg>
+              )}
+              {hashtagLoading ? "Adding..." : "Hashtags"}
+            </button>
+          )}
 
           {!finished ? (
             <button
@@ -447,6 +525,30 @@ function WriteEditor({ draftId }: { draftId: string }) {
                       This finished post is read-only. Press{" "}
                       <span className="font-medium text-chrome-text-strong">Edit</span>{" "}
                       to make changes.
+                    </div>
+                  )}
+                  {hashtagError && (
+                    <div className="flex items-center gap-2 border-b border-error/20 bg-error/5 px-4 py-2 text-xs text-error">
+                      <span className="flex-1">{hashtagError}</span>
+                      {hashtagSetupNeeded && (
+                        <button
+                          type="button"
+                          onClick={() => router.push("/settings")}
+                          className="font-medium underline underline-offset-2"
+                        >
+                          Go to Settings
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setHashtagError(null)}
+                        className="text-error/70 hover:text-error"
+                        aria-label="Dismiss"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
                   )}
                   <PostEditor
