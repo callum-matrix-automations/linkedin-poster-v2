@@ -17,6 +17,7 @@ import { LinkedInPreview } from "@/components/linkedin-preview";
 import { PostEditor } from "@/components/post-editor";
 import { PostCard } from "@/components/post-card";
 import { PostEditorSkeleton, DraftListSkeleton } from "@/components/skeleton";
+import { ProviderSetupPrompt } from "@/components/provider-setup-prompt";
 import type { PostSuggestion, LinkedInPost, SavedDraft, UserProfile } from "@/lib/types";
 
 function WriteEditor({ draftId }: { draftId: string }) {
@@ -28,6 +29,8 @@ function WriteEditor({ draftId }: { draftId: string }) {
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // True when generation failed because no AI provider is set up.
+  const [setupNeeded, setSetupNeeded] = useState(false);
   const [suggestion, setSuggestion] = useState<PostSuggestion | null>(null);
   const [inspirationPosts, setInspirationPosts] = useState<LinkedInPost[]>([]);
   const [tab, setTab] = useState<"editor" | "inspiration">("editor");
@@ -75,6 +78,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
   ) {
     setLoading(true);
     setError(null);
+    setSetupNeeded(false);
 
     try {
       const res = await fetch("/api/ai/generate-draft", {
@@ -85,6 +89,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        if (data.code === "setup_required") setSetupNeeded(true);
         throw new Error(data.error || `Request failed (${res.status})`);
       }
 
@@ -270,16 +275,20 @@ function WriteEditor({ draftId }: { draftId: string }) {
               )}
 
               {error && !loading && (
-                <div className="m-4 rounded-lg border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
-                  {error}
-                  <button
-                    type="button"
-                    onClick={handleRegenerate}
-                    className="ml-2 font-medium underline underline-offset-2"
-                  >
-                    Retry
-                  </button>
-                </div>
+                setupNeeded ? (
+                  <ProviderSetupPrompt message={error} className="m-4" />
+                ) : (
+                  <div className="m-4 rounded-lg border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
+                    {error}
+                    <button
+                      type="button"
+                      onClick={handleRegenerate}
+                      className="ml-2 font-medium underline underline-offset-2"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )
               )}
 
               {!loading && !error && (

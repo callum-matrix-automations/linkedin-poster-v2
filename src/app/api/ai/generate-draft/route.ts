@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile, LinkedInPost, PostSuggestion } from "@/lib/types";
-import { chatCompletion } from "@/lib/openai";
+import { chatCompletion } from "@/lib/ai/providers";
+import { resolveProvider, ResolveError } from "@/lib/ai/resolve";
+import { getUserId } from "@/lib/session";
 
 const SYSTEM_PROMPT = `You are a LinkedIn ghostwriter. You write posts that sound like they were written by the person, not by AI. Your job is to take a post idea and turn it into a compelling LinkedIn post.
 
@@ -72,6 +74,11 @@ function buildInspirationContext(posts: LinkedInPost[]): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = await getUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { profile, suggestion, posts } = (await request.json()) as {
       profile: UserProfile;
       suggestion: PostSuggestion;
@@ -84,6 +91,10 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    // Resolve the user's BYOK provider server-side. The key never came from
+    // the client and is decrypted here just-in-time.
+    const { provider, apiKey, model } = await resolveProvider(userId);
 
     const userMessage = [
       "Here is the user's profile:",
@@ -104,16 +115,25 @@ export async function POST(request: NextRequest) {
       "Write the post now. Raw text only, no commentary.",
     ].join("\n");
 
-    const draft = await chatCompletion(
-      [
+    const draft = await chatCompletion({
+      provider,
+      apiKey,
+      model,
+      messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      4096,
-    );
+      maxTokens: 4096,
+    });
 
     return NextResponse.json({ draft });
   } catch (err) {
+    if (err instanceof ResolveError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
+        { status: err.status },
+      );
+    }
     return NextResponse.json(
       {
         error:

@@ -24,6 +24,7 @@ model User {
   sessions Session[]
   profile  Profile?
   drafts   Draft[]
+  providerSettings ProviderSettings?
 
   @@map("users")
 }
@@ -49,6 +50,36 @@ model Profile {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("profiles")
+}
+
+// --- BYOK provider settings (per user) ---
+//
+// Each *Key column stores an AES-256-GCM ciphertext (see src/lib/crypto.ts),
+// never a plaintext key. The *Model columns store the user's chosen model id
+// for that provider. activeProvider names which provider generation uses.
+model ProviderSettings {
+  id     String @id @default(cuid())
+  userId String @unique @map("user_id")
+
+  // Which provider generation uses: "openai" | "anthropic" | "gemini".
+  // Empty string = not configured yet.
+  activeProvider String @default("") @map("active_provider")
+
+  // Encrypted keys (ciphertext or null when unset).
+  openaiKey    String? @map("openai_key")
+  anthropicKey String? @map("anthropic_key")
+  geminiKey    String? @map("gemini_key")
+
+  // Selected model per provider.
+  openaiModel    String @default("gpt-5.4-mini") @map("openai_model")
+  anthropicModel String @default("claude-sonnet-4-6") @map("anthropic_model")
+  geminiModel    String @default("gemini-2.5-flash") @map("gemini_model")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("provider_settings")
 }
 
 model Draft {

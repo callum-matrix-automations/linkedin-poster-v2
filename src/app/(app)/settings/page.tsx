@@ -1,41 +1,190 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PROVIDERS, type ProviderId } from "@/lib/providers";
+import {
+  getProviderSettings,
+  saveProviderSettings,
+  testProvider,
+  type Provider,
+  type SafeProviderSettings,
+} from "@/lib/provider-settings";
+import { SettingsSkeleton } from "@/components/skeleton";
+
+type TestState =
+  | { status: "idle" }
+  | { status: "testing" }
+  | { status: "ok"; model?: string }
+  | { status: "error"; message: string };
+
+// Providers that persist a BYOK key (everything except the local proxy).
+const KEYED: Provider[] = ["openai", "anthropic", "gemini"];
+
+function isKeyed(id: ProviderId): id is Provider {
+  return (KEYED as string[]).includes(id);
+}
 
 export default function SettingsPage() {
-  // Which provider is the active one used for generation.
-  const [activeProvider, setActiveProvider] = useState<ProviderId>("openai");
-  // Per-provider API keys (BYOK). UI-only for now — not persisted yet.
-  const [keys, setKeys] = useState<Record<ProviderId, string>>({
-    openai: "",
-    anthropic: "",
-    gemini: "",
-    "local-claude": "",
-  });
-  // Per-provider selected model.
-  const [models, setModels] = useState<Record<ProviderId, string>>({
-    openai: "gpt-5.4-mini",
-    anthropic: "claude-sonnet-4-6",
-    gemini: "gemini-3-flash",
-    "local-claude": "default",
-  });
-  const [revealed, setRevealed] = useState<Record<ProviderId, boolean>>({
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Which provider generation uses. "" until the user picks one.
+  const [activeProvider, setActiveProvider] = useState<string>("");
+  // Which providers already have a saved key (boolean only — never the value).
+  const [configured, setConfigured] = useState<Record<Provider, boolean>>({
     openai: false,
     anthropic: false,
     gemini: false,
-    "local-claude": false,
+  });
+  // Newly-typed keys this session (empty = unchanged). Never seeded from server.
+  const [keyDrafts, setKeyDrafts] = useState<Record<Provider, string>>({
+    openai: "",
+    anthropic: "",
+    gemini: "",
+  });
+  // Whether the user is actively editing a key (vs. seeing the "Saved" state).
+  const [editing, setEditing] = useState<Record<Provider, boolean>>({
+    openai: false,
+    anthropic: false,
+    gemini: false,
+  });
+  const [models, setModels] = useState<Record<Provider, string>>({
+    openai: "gpt-5.4-mini",
+    anthropic: "claude-sonnet-4-6",
+    gemini: "gemini-2.5-flash",
+  });
+  const [revealed, setRevealed] = useState<Record<Provider, boolean>>({
+    openai: false,
+    anthropic: false,
+    gemini: false,
+  });
+  const [tests, setTests] = useState<Record<Provider, TestState>>({
+    openai: { status: "idle" },
+    anthropic: { status: "idle" },
+    gemini: { status: "idle" },
+  });
+  // Inline per-field key-save state (keys persist on blur, not via Save bar).
+  const [keySave, setKeySave] = useState<
+    Record<Provider, "idle" | "saving" | "saved">
+  >({
+    openai: "idle",
+    anthropic: "idle",
+    gemini: "idle",
   });
 
-  function setKey(id: ProviderId, value: string) {
-    setKeys((prev) => ({ ...prev, [id]: value }));
+  useEffect(() => {
+    getProviderSettings()
+      .then(applySettings)
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"))
+      .finally(() => setLoaded(true));
+  }, []);
+
+  function applySettings(s: SafeProviderSettings) {
+    setActiveProvider(s.activeProvider);
+    setConfigured(s.configured);
+    setModels(s.models);
   }
-  function setModel(id: ProviderId, value: string) {
+
+  function resetTest(id: Provider) {
+    setTests((prev) =>
+      prev[id].status === "idle" ? prev : { ...prev, [id]: { status: "idle" } },
+    );
+  }
+  function setKey(id: Provider, value: string) {
+    setKeyDrafts((prev) => ({ ...prev, [id]: value }));
+    setKeySave((prev) => (prev[id] === "idle" ? prev : { ...prev, [id]: "idle" }));
+    resetTest(id);
+  }
+
+  /**
+   * Persist a key the moment the user leaves the field — no Save-bar step.
+   * Saves only when there's an actual new value; an untouched/blank field is
+   * a no-op (and never clears an already-saved key).
+   */
+  async function handleKeyBlur(id: Provider) {
+    const value = keyDrafts[id].trim();
+    if (!value) return; // nothing typed — don't save, don't clear
+    setKeySave((prev) => ({ ...prev, [id]: "saving" }));
+    setError(null);
+    try {
+      const next = await saveProviderSettings({ keys: { [id]: value } });
+      setConfigured(next.configured);
+      // Key is stored server-side now — drop the local plaintext draft and
+      // flip the field back to its masked "Saved" state.
+      setKeyDrafts((prev) => ({ ...prev, [id]: "" }));
+      setEditing((prev) => ({ ...prev, [id]: false }));
+      setRevealed((prev) => ({ ...prev, [id]: false }));
+      setKeySave((prev) => ({ ...prev, [id]: "saved" }));
+      setTimeout(
+        () =>
+          setKeySave((prev) =>
+            prev[id] === "saved" ? { ...prev, [id]: "idle" } : prev,
+          ),
+        2000,
+      );
+    } catch (e) {
+      setKeySave((prev) => ({ ...prev, [id]: "idle" }));
+      setError(e instanceof Error ? e.message : "Failed to save key");
+    }
+  }
+  function setModel(id: Provider, value: string) {
     setModels((prev) => ({ ...prev, [id]: value }));
+    setSaved(false);
+    resetTest(id);
   }
-  function toggleReveal(id: ProviderId) {
+
+  async function handleTest(id: Provider) {
+    setTests((prev) => ({ ...prev, [id]: { status: "testing" } }));
+    try {
+      const result = await testProvider(id);
+      setTests((prev) => ({
+        ...prev,
+        [id]: result.ok
+          ? { status: "ok", model: result.model }
+          : { status: "error", message: result.error || "Test failed" },
+      }));
+    } catch (e) {
+      setTests((prev) => ({
+        ...prev,
+        [id]: {
+          status: "error",
+          message: e instanceof Error ? e.message : "Test failed",
+        },
+      }));
+    }
+  }
+  function toggleReveal(id: Provider) {
     setRevealed((prev) => ({ ...prev, [id]: !prev[id] }));
   }
+  function startEditing(id: Provider) {
+    setEditing((prev) => ({ ...prev, [id]: true }));
+  }
+  function chooseActive(id: string) {
+    setActiveProvider(id);
+    setSaved(false);
+  }
+
+  // Keys persist on blur (handleKeyBlur). The Save bar only commits the active
+  // provider choice and model selections.
+  async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await saveProviderSettings({ activeProvider, models });
+      applySettings(next);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!loaded) return <SettingsSkeleton />;
 
   return (
     <div className="min-h-dvh bg-chrome px-6 py-12">
@@ -52,9 +201,17 @@ export default function SettingsPage() {
 
         <div className="flex flex-col gap-4">
           {PROVIDERS.map((provider) => {
+            const keyed = isKeyed(provider.id);
+            // Narrowed id for indexing the per-provider records (only meaningful
+            // when `keyed`). The keyed-only JSX below always guards on `keyed`.
+            const pid = (keyed ? provider.id : "openai") as Provider;
             const isActive = activeProvider === provider.id;
-            const hasKey =
-              provider.requiresDesktopApp || keys[provider.id].trim().length > 0;
+            // A provider can be selected as active once it has a saved key
+            // (or a freshly typed one). Desktop proxy can't be activated yet.
+            const hasSavedKey = keyed && configured[pid];
+            const hasDraftKey =
+              keyed && editing[pid] && keyDrafts[pid].trim().length > 0;
+            const selectable = hasSavedKey || hasDraftKey;
 
             return (
               <section
@@ -104,34 +261,36 @@ export default function SettingsPage() {
                   </div>
 
                   {/* Use-this toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setActiveProvider(provider.id)}
-                    disabled={isActive || (!hasKey && !provider.requiresDesktopApp)}
-                    className="shrink-0 rounded-lg border px-3.5 py-2 text-xs font-medium transition-all disabled:cursor-not-allowed"
-                    style={{
-                      transitionDuration: "var(--duration-fast)",
-                      transitionTimingFunction: "var(--ease-out-expo)",
-                      borderColor: isActive
-                        ? "var(--accent)"
-                        : "var(--chrome-border)",
-                      color: isActive
-                        ? "var(--accent)"
-                        : !hasKey && !provider.requiresDesktopApp
-                          ? "oklch(45% 0.01 80)"
-                          : "var(--chrome-text-strong)",
-                      backgroundColor: isActive
-                        ? "oklch(80% 0.13 86 / 0.12)"
-                        : "transparent",
-                    }}
-                  >
-                    {isActive ? "In use" : "Use this"}
-                  </button>
+                  {!provider.requiresDesktopApp && (
+                    <button
+                      type="button"
+                      onClick={() => keyed && chooseActive(provider.id)}
+                      disabled={isActive || !selectable}
+                      className="shrink-0 rounded-lg border px-3.5 py-2 text-xs font-medium transition-all disabled:cursor-not-allowed"
+                      style={{
+                        transitionDuration: "var(--duration-fast)",
+                        transitionTimingFunction: "var(--ease-out-expo)",
+                        borderColor: isActive
+                          ? "var(--accent)"
+                          : "var(--chrome-border)",
+                        color: isActive
+                          ? "var(--accent)"
+                          : !selectable
+                            ? "oklch(45% 0.01 80)"
+                            : "var(--chrome-text-strong)",
+                        backgroundColor: isActive
+                          ? "oklch(80% 0.13 86 / 0.12)"
+                          : "transparent",
+                      }}
+                    >
+                      {isActive ? "In use" : "Use this"}
+                    </button>
+                  )}
                 </div>
 
                 {/* Body */}
                 <div className="px-5 pb-5 pt-4">
-                  {provider.requiresDesktopApp ? (
+                  {provider.requiresDesktopApp || !keyed ? (
                     <DesktopNotice />
                   ) : (
                     <div className="flex flex-col gap-4">
@@ -152,36 +311,103 @@ export default function SettingsPage() {
                             </a>
                           )}
                         </div>
-                        <div className="relative">
-                          <input
-                            type={revealed[provider.id] ? "text" : "password"}
-                            value={keys[provider.id]}
-                            onChange={(e) => setKey(provider.id, e.target.value)}
-                            placeholder={provider.keyPlaceholder}
-                            autoComplete="off"
-                            spellCheck={false}
-                            className="w-full rounded-lg border border-chrome-border bg-chrome px-4 py-3 pr-20 font-mono text-sm text-chrome-text-strong outline-none transition-colors placeholder:text-chrome-text focus:border-accent"
-                            style={{ transitionDuration: "var(--duration-fast)" }}
-                          />
-                          {keys[provider.id].length > 0 && (
+
+                        {configured[pid] && !editing[pid] ? (
+                          // Saved state — cosmetic dots, no real key material.
+                          <div className="flex items-center justify-between rounded-lg border border-chrome-border bg-chrome px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <svg
+                                width="15"
+                                height="15"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="text-success"
+                                aria-hidden="true"
+                              >
+                                <path d="M20 6L9 17l-5-5" />
+                              </svg>
+                              <span className="font-mono text-sm tracking-widest text-chrome-text">
+                                ••••••••••••
+                              </span>
+                              <span className="text-xs font-medium text-success">
+                                Saved
+                              </span>
+                            </div>
                             <button
                               type="button"
-                              onClick={() => toggleReveal(provider.id)}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-chrome-text transition-colors hover:text-chrome-text-strong"
+                              onClick={() => startEditing(pid)}
+                              className="text-xs font-medium text-chrome-text transition-colors hover:text-chrome-text-strong"
                               style={{ transitionDuration: "var(--duration-fast)" }}
                             >
-                              {revealed[provider.id] ? "Hide" : "Show"}
+                              Replace
                             </button>
-                          )}
-                        </div>
+                          </div>
+                        ) : (
+                          <div className="relative">
+                            <input
+                              type={revealed[pid] ? "text" : "password"}
+                              value={keyDrafts[pid]}
+                              onChange={(e) => setKey(pid, e.target.value)}
+                              onFocus={() => startEditing(pid)}
+                              onBlur={() => handleKeyBlur(pid)}
+                              placeholder={provider.keyPlaceholder}
+                              autoComplete="off"
+                              spellCheck={false}
+                              disabled={keySave[pid] === "saving"}
+                              className="w-full rounded-lg border border-chrome-border bg-chrome px-4 py-3 pr-20 font-mono text-sm text-chrome-text-strong outline-none transition-colors placeholder:text-chrome-text focus:border-accent disabled:opacity-60"
+                              style={{ transitionDuration: "var(--duration-fast)" }}
+                            />
+                            {keyDrafts[pid].length > 0 && (
+                              <button
+                                type="button"
+                                // Keep focus so blur-to-save doesn't fire on toggle.
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => toggleReveal(pid)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-chrome-text transition-colors hover:text-chrome-text-strong"
+                                style={{ transitionDuration: "var(--duration-fast)" }}
+                              >
+                                {revealed[pid] ? "Hide" : "Show"}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {/* Inline save/help state under the field */}
+                        {keySave[pid] === "saving" ? (
+                          <p className="mt-1.5 flex items-center gap-1.5 text-xs text-chrome-text">
+                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-chrome-border border-t-accent" />
+                            Saving key…
+                          </p>
+                        ) : keySave[pid] === "saved" ? (
+                          <p className="mt-1.5 text-xs font-medium text-success">
+                            Key saved.
+                          </p>
+                        ) : !configured[pid] && !editing[pid] ? (
+                          <p className="mt-1.5 text-xs text-chrome-text">
+                            Not set — paste a key to use this provider.
+                          </p>
+                        ) : editing[pid] ? (
+                          <p className="mt-1.5 text-xs text-chrome-text">
+                            Paste your key, then click away to save it.
+                          </p>
+                        ) : null}
                       </div>
 
                       {/* Model selector */}
                       <ModelPicker
-                        providerId={provider.id}
                         models={provider.models}
-                        selected={models[provider.id]}
-                        onSelect={(m) => setModel(provider.id, m)}
+                        selected={models[pid]}
+                        onSelect={(m) => setModel(pid, m)}
+                      />
+
+                      {/* Test connection */}
+                      <TestRow
+                        canTest={configured[pid] && !editing[pid]}
+                        state={tests[pid]}
+                        onTest={() => handleTest(pid)}
                       />
                     </div>
                   )}
@@ -195,20 +421,77 @@ export default function SettingsPage() {
         <div className="mt-10 flex items-center gap-3 border-t border-chrome-border pt-6">
           <button
             type="button"
-            disabled
+            onClick={handleSave}
+            disabled={saving}
             className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover disabled:opacity-40"
             style={{
               transitionDuration: "var(--duration-fast)",
               transitionTimingFunction: "var(--ease-out-expo)",
             }}
           >
-            Save settings
+            {saving ? "Saving..." : saved ? "Saved" : "Save settings"}
           </button>
-          <span className="text-xs text-chrome-text">
-            Persistence comes next — this view is the interface only.
-          </span>
+          {saved ? (
+            <span className="text-sm text-accent">Settings saved.</span>
+          ) : (
+            <span className="text-xs text-chrome-text">
+              Saves your provider and model choice. API keys save automatically
+              when entered.
+            </span>
+          )}
+          {error && <span className="text-sm text-error">{error}</span>}
         </div>
       </div>
+    </div>
+  );
+}
+
+function TestRow({
+  canTest,
+  state,
+  onTest,
+}: {
+  canTest: boolean;
+  state: TestState;
+  onTest: () => void;
+}) {
+  const testing = state.status === "testing";
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={onTest}
+        disabled={!canTest || testing}
+        className="flex items-center gap-2 rounded-lg border border-chrome-border px-3.5 py-2 text-xs font-medium text-chrome-text-strong transition-colors hover:border-chrome-text disabled:cursor-not-allowed disabled:opacity-40"
+        style={{ transitionDuration: "var(--duration-fast)" }}
+      >
+        {testing && (
+          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-chrome-border border-t-accent" />
+        )}
+        {testing ? "Testing..." : "Test connection"}
+      </button>
+
+      {state.status === "ok" && (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-success">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          Working{state.model ? ` — ${state.model}` : ""}
+        </span>
+      )}
+      {state.status === "error" && (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-error">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          {state.message}
+        </span>
+      )}
+      {state.status === "idle" && !canTest && (
+        <span className="text-xs text-chrome-text">Save a key to test it.</span>
+      )}
     </div>
   );
 }
@@ -218,7 +501,6 @@ function ModelPicker({
   selected,
   onSelect,
 }: {
-  providerId: ProviderId;
   models: { id: string; label: string; note?: string }[];
   selected: string;
   onSelect: (id: string) => void;

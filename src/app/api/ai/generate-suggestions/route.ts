@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile, LinkedInPost, PostSuggestion } from "@/lib/types";
-import { chatCompletion } from "@/lib/openai";
+import { chatCompletion } from "@/lib/ai/providers";
+import { resolveProvider, ResolveError } from "@/lib/ai/resolve";
+import { getUserId } from "@/lib/session";
 
 const SYSTEM_PROMPT = `You are a LinkedIn post strategist. Your job is to analyze high-performing LinkedIn posts and a user's profile to suggest post ideas that will resonate with their audience.
 
@@ -82,6 +84,11 @@ function buildInspirationContext(posts: LinkedInPost[]): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = await getUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { profile, posts, count = 6 } = (await request.json()) as {
       profile: UserProfile;
       posts: LinkedInPost[];
@@ -95,6 +102,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const { provider, apiKey, model } = await resolveProvider(userId);
+
     const userMessage = [
       "Here is the user's profile:",
       "",
@@ -107,13 +116,16 @@ export async function POST(request: NextRequest) {
       `Generate ${count} post suggestions for this person. Remember: respond with ONLY a raw JSON array, no markdown fences.`,
     ].join("\n");
 
-    const text = await chatCompletion(
-      [
+    const text = await chatCompletion({
+      provider,
+      apiKey,
+      model,
+      messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      4096,
-    );
+      maxTokens: 4096,
+    });
 
     let suggestions: PostSuggestion[];
     try {
@@ -138,6 +150,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ suggestions });
   } catch (err) {
+    if (err instanceof ResolveError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
+        { status: err.status },
+      );
+    }
     return NextResponse.json(
       {
         error: err instanceof Error ? err.message : "Failed to generate suggestions",

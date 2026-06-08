@@ -7,6 +7,7 @@ import { useProfile, useDrafts } from "@/components/app-data-provider";
 import { clearCurrentDraft } from "@/lib/draft-store";
 import { PostCard } from "@/components/post-card";
 import { SuggestionCard } from "@/components/suggestion-card";
+import { ProviderSetupPrompt } from "@/components/provider-setup-prompt";
 import { EMPTY_PROFILE } from "@/lib/types";
 import type { LinkedInPost, PostSuggestion } from "@/lib/types";
 
@@ -138,6 +139,9 @@ export default function FindPage() {
   const [suggestions, setSuggestions] = useState<PostSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  // True when the error is "no provider configured" — show a Settings link
+  // instead of a Retry button.
+  const [suggestionsSetupNeeded, setSuggestionsSetupNeeded] = useState(false);
   const [creatingDraft, setCreatingDraft] = useState(false);
 
   useEffect(() => {
@@ -228,14 +232,18 @@ export default function FindPage() {
   const selectedPosts = useMemo(() => filteredPosts.filter((p) => selectedPostIds.has(p.id)), [filteredPosts, selectedPostIds]);
 
   async function handleGenerateSuggestions() {
-    setSuggestionsLoading(true); setSuggestionsError(null); setSuggestions([]);
+    setSuggestionsLoading(true); setSuggestionsError(null); setSuggestionsSetupNeeded(false); setSuggestions([]);
     try {
       const postsForAI = selectedPosts.length > 0 ? selectedPosts : filteredPosts.slice(0, 6);
       const res = await fetch("/api/ai/generate-suggestions", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile: profile ?? EMPTY_PROFILE, posts: postsForAI, count: 6 }),
       });
-      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.error || `Request failed (${res.status})`); }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.code === "setup_required") setSuggestionsSetupNeeded(true);
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
       const data = await res.json();
       setSuggestions(data.suggestions || []);
     } catch (err) {
@@ -430,10 +438,14 @@ export default function FindPage() {
         )}
 
         {suggestionsError && (
-          <div className="mt-8 rounded-lg border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
-            {suggestionsError}
-            <button type="button" onClick={handleGenerateSuggestions} className="ml-2 font-medium underline underline-offset-2">Retry</button>
-          </div>
+          suggestionsSetupNeeded ? (
+            <ProviderSetupPrompt message={suggestionsError} className="mt-8" />
+          ) : (
+            <div className="mt-8 rounded-lg border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
+              {suggestionsError}
+              <button type="button" onClick={handleGenerateSuggestions} className="ml-2 font-medium underline underline-offset-2">Retry</button>
+            </div>
+          )
         )}
 
         {suggestions.length > 0 && (

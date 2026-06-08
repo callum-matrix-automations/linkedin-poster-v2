@@ -295,11 +295,19 @@ DATABASE_URL=postgresql://postgres:<pw>@postgres.railway.internal:5432/railway
 # Auth.js (NextAuth v5)
 AUTH_SECRET=<32-byte base64 secret>   # generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 AUTH_TRUST_HOST=true                  # required behind Railway's proxy
+
+# BYOK — master key for encrypting users' provider API keys at rest
+ENCRYPTION_KEY=<32-byte base64 secret>  # same generator as AUTH_SECRET, but a DISTINCT value
 ```
 
 Local dev uses the **public** Postgres URL (`...proxy.rlwy.net:PORT`) in
 `.env.local`; production uses the **internal** URL (`postgres.railway.internal`)
 which is faster and private.
+
+`ENCRYPTION_KEY` must be set in production **before** any user saves a provider
+key, and must **never change** afterwards — rotating it makes every stored key
+undecryptable (the resolver returns a "re-enter it in Settings" error and users
+must paste their keys again). Keep it distinct from `AUTH_SECRET`.
 
 ### Database migrations on deploy (IMPORTANT)
 

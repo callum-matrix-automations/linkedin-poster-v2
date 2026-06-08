@@ -96,8 +96,9 @@ export const PROVIDERS: ProviderConfig[] = [
     keysUrl: "https://aistudio.google.com/app/apikey",
     keyPlaceholder: "AIza...",
     models: [
-      { id: "gemini-3-pro", label: "Gemini 3 Pro", note: "Most capable" },
-      { id: "gemini-3-flash", label: "Gemini 3 Flash", note: "Fast & affordable" },
+      { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "Most capable" },
+      { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", note: "Latest, fast" },
+      { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "Fast & affordable" },
     ],
   },
   {

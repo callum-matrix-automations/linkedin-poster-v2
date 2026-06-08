@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import type { UserProfile } from "@/lib/types";
-import { chatCompletionStream } from "@/lib/openai";
+import { chatCompletionStream } from "@/lib/ai/providers";
+import { resolveProvider, ResolveError } from "@/lib/ai/resolve";
+import { getUserId } from "@/lib/session";
 
 const SYSTEM_PROMPT = `You are an inline text editor for LinkedIn posts. You receive a selected portion of text from a LinkedIn post and an editing instruction. Your job is to transform ONLY the selected text according to the instruction while maintaining consistency with the full post's voice and tone.
 
@@ -34,6 +36,11 @@ function buildUserContext(profile: UserProfile): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const userId = await getUserId();
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { action, selectedText, fullContent, customPrompt, profile } =
       (await request.json()) as {
         action: string;
@@ -49,6 +56,8 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    const { provider, apiKey, model } = await resolveProvider(userId);
 
     const instruction =
       action === "custom" && customPrompt
@@ -81,77 +90,18 @@ export async function POST(request: NextRequest) {
       "Return ONLY the replacement text.",
     ].join("\n");
 
-    const resp = await chatCompletionStream(
-      [
+    // The provider abstraction returns a normalized SSE stream
+    // (`data: {"text":"..."}` then `data: [DONE]`), so the client parser is
+    // provider-agnostic.
+    const readable = await chatCompletionStream({
+      provider,
+      apiKey,
+      model,
+      messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      2048,
-    );
-
-    if (!resp.ok) {
-      const errorText = await resp.text();
-      return Response.json(
-        { error: `AI request failed (${resp.status}): ${errorText}` },
-        { status: resp.status },
-      );
-    }
-
-    const encoder = new TextEncoder();
-    const readable = new ReadableStream({
-      async start(controller) {
-        const reader = resp.body?.getReader();
-        if (!reader) {
-          controller.close();
-          return;
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
-
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const dataStr = line.slice(6).trim();
-              if (!dataStr) continue;
-              if (dataStr === "[DONE]") {
-                controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-                continue;
-              }
-
-              try {
-                // OpenAI SSE: { choices: [{ delta: { content } }] }
-                const event = JSON.parse(dataStr);
-                const text = event.choices?.[0]?.delta?.content;
-                if (text) {
-                  controller.enqueue(
-                    encoder.encode(`data: ${JSON.stringify({ text })}\n\n`),
-                  );
-                }
-              } catch {
-                // skip unparseable lines
-              }
-            }
-          }
-        } catch (err) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ error: err instanceof Error ? err.message : "Stream error" })}\n\n`,
-            ),
-          );
-        } finally {
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        }
-      },
+      maxTokens: 2048,
     });
 
     return new Response(readable, {
@@ -162,6 +112,12 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err) {
+    if (err instanceof ResolveError) {
+      return Response.json(
+        { error: err.message, code: err.code },
+        { status: err.status },
+      );
+    }
     return Response.json(
       {
         error:
