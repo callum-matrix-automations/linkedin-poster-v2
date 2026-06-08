@@ -18,6 +18,8 @@ import { PostEditor } from "@/components/post-editor";
 import { PostCard } from "@/components/post-card";
 import { PostEditorSkeleton, DraftListSkeleton } from "@/components/skeleton";
 import { ProviderSetupPrompt } from "@/components/provider-setup-prompt";
+import { LinkedInPublishDialog } from "@/components/linkedin-publish-dialog";
+import { getLinkedInStatus } from "@/lib/linkedin-client";
 import type { PostSuggestion, LinkedInPost, SavedDraft, UserProfile } from "@/lib/types";
 
 function WriteEditor({ draftId }: { draftId: string }) {
@@ -36,6 +38,15 @@ function WriteEditor({ draftId }: { draftId: string }) {
   const [tab, setTab] = useState<"editor" | "inspiration">("editor");
   const [copied, setCopied] = useState(false);
   const [finished, setFinished] = useState(false);
+  // Finished posts open read-only; "Edit" unlocks them. `locked` only applies
+  // to finished posts. `preEditContent` snapshots the text so Cancel can revert.
+  const [locked, setLocked] = useState(false);
+  const [preEditContent, setPreEditContent] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  // LinkedIn: live connection check (run on entering the write phase) + dialog.
+  // null = unknown/checking, true = connected & valid, false = needs (re)connect.
+  const [linkedinReady, setLinkedinReady] = useState<boolean | null>(null);
+  const [showPublish, setShowPublish] = useState(false);
   // Author identity comes from the cached profile; falls back to empty until loaded.
   const authorName = profile?.name ?? "";
   const authorTitle = profile?.title ?? "";
@@ -55,7 +66,10 @@ function WriteEditor({ draftId }: { draftId: string }) {
 
       setSuggestion(draft.suggestion);
       setInspirationPosts(draft.inspirationPosts ?? []);
-      setFinished(draft.status === "finished");
+      const isFinished = draft.status === "finished";
+      setFinished(isFinished);
+      // Finished posts open locked (read-only) until the user clicks Edit.
+      setLocked(isFinished);
       setMounted(true);
 
       if (draft.content) {
@@ -70,6 +84,26 @@ function WriteEditor({ draftId }: { draftId: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, router, profile]);
+
+  // Live LinkedIn connection check on entering the write phase. A live=1 check
+  // verifies the token still works (not just that a row exists), so an expired
+  // connection shows "Reconnect" rather than failing at publish time.
+  useEffect(() => {
+    let cancelled = false;
+    getLinkedInStatus(true)
+      .then((s) => {
+        if (cancelled) return;
+        // valid can be true | false | null(unknown). Treat unknown as ready so
+        // a transient network blip doesn't block posting; publish handles 401.
+        setLinkedinReady(s.connected && s.valid !== false);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedinReady(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function generateDraft(
     profile: UserProfile,
@@ -107,13 +141,15 @@ function WriteEditor({ draftId }: { draftId: string }) {
   const handleDraftChange = useCallback(
     (value: string) => {
       setContent(value);
-      // Debounce DB writes while typing.
+      // Drafts autosave as you type. Finished posts don't — their edits are
+      // held until the explicit Save button (handleSaveEdit).
+      if (finished) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         void updateDraftContent(draftId, value);
       }, 600);
     },
-    [draftId],
+    [draftId, finished],
   );
 
   useEffect(() => {
@@ -138,6 +174,40 @@ function WriteEditor({ draftId }: { draftId: string }) {
     // reflects the move when we land back on the list.
     await Promise.all([refreshDrafts(), refreshHistory()]);
     router.push("/write");
+  }
+
+  // --- Finished-post edit lock ---
+  function handleStartEdit() {
+    setPreEditContent(content); // snapshot for Cancel
+    setLocked(false);
+  }
+
+  function handleCancelEdit() {
+    setContent(preEditContent); // revert unsaved changes
+    setLocked(true);
+  }
+
+  async function handleSaveEdit() {
+    if (savingEdit) return;
+    setSavingEdit(true);
+    try {
+      await updateDraftContent(draftId, content);
+      // Reflect the edited content in the cached history list.
+      await refreshHistory();
+      setLocked(true);
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  function handlePostToLinkedIn() {
+    if (!content) return;
+    // If the live check says not connected/expired, send them to connect first.
+    if (linkedinReady === false) {
+      router.push("/settings");
+      return;
+    }
+    setShowPublish(true);
   }
 
   async function handleCopy() {
@@ -186,15 +256,19 @@ function WriteEditor({ draftId }: { draftId: string }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleRegenerate}
-            disabled={loading}
-            className="rounded-lg border border-chrome-border px-3 py-1.5 text-sm text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong disabled:opacity-30"
-            style={{ transitionDuration: "var(--duration-fast)" }}
-          >
-            Regenerate
-          </button>
+          {/* Drafting posts: regenerate + finish. Finished posts: edit lock. */}
+          {!finished && (
+            <button
+              type="button"
+              onClick={handleRegenerate}
+              disabled={loading}
+              className="rounded-lg border border-chrome-border px-3 py-1.5 text-sm text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong disabled:opacity-30"
+              style={{ transitionDuration: "var(--duration-fast)" }}
+            >
+              Regenerate
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleCopy}
@@ -204,20 +278,91 @@ function WriteEditor({ draftId }: { draftId: string }) {
           >
             {copied ? "Copied" : "Copy"}
           </button>
-          <button
-            type="button"
-            onClick={handleFinish}
-            disabled={!content || finished}
-            className="rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover disabled:opacity-30"
-            style={{
-              transitionDuration: "var(--duration-fast)",
-              transitionTimingFunction: "var(--ease-out-expo)",
-            }}
-          >
-            {finished ? "Finished" : "Mark as finished"}
-          </button>
+
+          {!finished ? (
+            <button
+              type="button"
+              onClick={handleFinish}
+              disabled={!content}
+              className="rounded-lg border border-chrome-border px-3 py-1.5 text-sm text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong disabled:opacity-30"
+              style={{ transitionDuration: "var(--duration-fast)" }}
+            >
+              Mark as finished
+            </button>
+          ) : locked ? (
+            <button
+              type="button"
+              onClick={handleStartEdit}
+              className="flex items-center gap-1.5 rounded-lg border border-chrome-border px-3 py-1.5 text-sm text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong"
+              style={{ transitionDuration: "var(--duration-fast)" }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+              </svg>
+              Edit
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                disabled={savingEdit}
+                className="rounded-lg border border-chrome-border px-3 py-1.5 text-sm text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong disabled:opacity-30"
+                style={{ transitionDuration: "var(--duration-fast)" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={savingEdit || !content}
+                className="rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover disabled:opacity-40"
+                style={{
+                  transitionDuration: "var(--duration-fast)",
+                  transitionTimingFunction: "var(--ease-out-expo)",
+                }}
+              >
+                {savingEdit ? "Saving..." : "Save changes"}
+              </button>
+            </>
+          )}
+
+          {/* Post to LinkedIn — hidden while actively editing a finished post
+              (save first), shown otherwise. */}
+          {!(finished && !locked) && (
+            <button
+              type="button"
+              onClick={handlePostToLinkedIn}
+              disabled={!content || loading}
+              title={
+                linkedinReady === false
+                  ? "Connect LinkedIn in Settings to post"
+                  : "Post this to your LinkedIn feed"
+              }
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover disabled:opacity-30"
+              style={{
+                transitionDuration: "var(--duration-fast)",
+                transitionTimingFunction: "var(--ease-out-expo)",
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.13 1.45-2.13 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.45v6.29zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.22.79 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z" />
+              </svg>
+              {linkedinReady === false ? "Connect to post" : "Post to LinkedIn"}
+            </button>
+          )}
         </div>
       </header>
+
+      {showPublish && (
+        <LinkedInPublishDialog
+          text={content}
+          authorName={authorName}
+          authorTitle={authorTitle}
+          onClose={() => setShowPublish(false)}
+        />
+      )}
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 flex-col" style={{ width: "55%" }}>
@@ -292,11 +437,25 @@ function WriteEditor({ draftId }: { draftId: string }) {
               )}
 
               {!loading && !error && (
-                <PostEditor
-                  value={content}
-                  onChange={handleDraftChange}
-                  placeholder="Start writing your post..."
-                />
+                <>
+                  {locked && (
+                    <div className="flex items-center gap-2 border-b border-chrome-border bg-chrome-light px-4 py-2 text-xs text-chrome-text">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                      This finished post is read-only. Press{" "}
+                      <span className="font-medium text-chrome-text-strong">Edit</span>{" "}
+                      to make changes.
+                    </div>
+                  )}
+                  <PostEditor
+                    value={content}
+                    onChange={handleDraftChange}
+                    placeholder="Start writing your post..."
+                    readOnly={locked}
+                  />
+                </>
               )}
             </>
           ) : (
@@ -416,6 +575,7 @@ function DraftList() {
                   draft={d}
                   finished
                   onOpen={() => router.push(`/write?id=${d.id}`)}
+                  onPostToLinkedIn={() => router.push(`/write?id=${d.id}`)}
                 />
               ))}
             </div>
@@ -431,11 +591,13 @@ function DraftRow({
   finished,
   onOpen,
   onDelete,
+  onPostToLinkedIn,
 }: {
   draft: SavedDraft;
   finished?: boolean;
   onOpen: () => void;
   onDelete?: () => void;
+  onPostToLinkedIn?: () => void;
 }) {
   const preview = draft.content
     ? draft.content.slice(0, 100).trimEnd() +
@@ -460,6 +622,20 @@ function DraftRow({
         </div>
         <p className="truncate text-xs text-chrome-text">{preview}</p>
       </button>
+      {onPostToLinkedIn && (
+        <button
+          type="button"
+          onClick={onPostToLinkedIn}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-chrome-border px-3 py-1.5 text-xs font-medium text-chrome-text opacity-0 transition-all hover:border-accent hover:text-accent group-hover:opacity-100"
+          style={{ transitionDuration: "var(--duration-fast)" }}
+          title="Edit and post this to LinkedIn"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.13 1.45-2.13 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.45v6.29zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.22.79 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z" />
+          </svg>
+          Post
+        </button>
+      )}
       {onDelete && (
         <button
           type="button"

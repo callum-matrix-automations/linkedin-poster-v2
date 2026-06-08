@@ -298,7 +298,20 @@ AUTH_TRUST_HOST=true                  # required behind Railway's proxy
 
 # BYOK — master key for encrypting users' provider API keys at rest
 ENCRYPTION_KEY=<32-byte base64 secret>  # same generator as AUTH_SECRET, but a DISTINCT value
+
+# LinkedIn OAuth (Sign in with OpenID Connect + Share on LinkedIn products)
+LINKEDIN_CLIENT_ID=<from LinkedIn app Auth tab>
+LINKEDIN_CLIENT_SECRET=<from LinkedIn app Auth tab>
+LINKEDIN_REDIRECT_URI=https://<railway-domain>/api/linkedin/callback
 ```
+
+The LinkedIn redirect URI must **exactly match** one registered in the app's
+Auth tab (register both the localhost dev URI and the Railway prod URI). The
+app needs the **Sign in with LinkedIn using OpenID Connect** and **Share on
+LinkedIn** products (both self-serve, no approval). Stored LinkedIn access
+tokens are encrypted with the same `ENCRYPTION_KEY`. LinkedIn access tokens
+last ~60 days and refresh tokens are partner-gated (we don't expect them), so
+users reconnect periodically — there is no token-refresh cron.
 
 Local dev uses the **public** Postgres URL (`...proxy.rlwy.net:PORT`) in
 `.env.local`; production uses the **internal** URL (`postgres.railway.internal`)

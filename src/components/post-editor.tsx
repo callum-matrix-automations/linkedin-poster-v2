@@ -9,6 +9,8 @@ interface PostEditorProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  /** When true the editor is locked: not editable and inline AI edits are off. */
+  readOnly?: boolean;
 }
 
 function getStats(text: string) {
@@ -63,7 +65,7 @@ function getSelectionOffsets(
   return { start, end };
 }
 
-export function PostEditor({ value, onChange, placeholder }: PostEditorProps) {
+export function PostEditor({ value, onChange, placeholder, readOnly = false }: PostEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const isUpdating = useRef(false);
   const [inlineLoading, setInlineLoading] = useState(false);
@@ -276,7 +278,7 @@ export function PostEditor({ value, onChange, placeholder }: PostEditorProps) {
         {/* ContentEditable */}
         <div
           ref={editorRef}
-          contentEditable={!inlineLoading}
+          contentEditable={!inlineLoading && !readOnly}
           suppressContentEditableWarning
           onInput={syncFromDOM}
           data-placeholder={placeholder || "Start writing..."}
@@ -285,11 +287,11 @@ export function PostEditor({ value, onChange, placeholder }: PostEditorProps) {
             caretColor: "var(--accent)",
             opacity: inlineLoading ? 0.6 : 1,
           }}
-          spellCheck
+          spellCheck={!readOnly}
         />
 
-        {/* Inline edit toolbar */}
-        {toolbar.isOpen && !pendingDiff && (
+        {/* Inline edit toolbar (disabled while read-only) */}
+        {toolbar.isOpen && !pendingDiff && !readOnly && (
           <InlineEditToolbar
             position={toolbar.position}
             selectedText={toolbar.selectedText}

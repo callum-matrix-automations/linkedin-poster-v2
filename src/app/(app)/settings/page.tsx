@@ -9,7 +9,13 @@ import {
   type Provider,
   type SafeProviderSettings,
 } from "@/lib/provider-settings";
-import { SettingsSkeleton } from "@/components/skeleton";
+import { SettingsSkeleton, Skeleton } from "@/components/skeleton";
+import {
+  getLinkedInStatus,
+  disconnectLinkedIn,
+  startLinkedInConnect,
+  type LinkedInStatus,
+} from "@/lib/linkedin-client";
 
 type TestState =
   | { status: "idle" }
@@ -417,7 +423,10 @@ export default function SettingsPage() {
           })}
         </div>
 
-        {/* Save bar */}
+        {/* LinkedIn connection (separate from AI provider settings) */}
+        <LinkedInSection />
+
+        {/* Save bar (AI provider + model only — keys & LinkedIn save on their own) */}
         <div className="mt-10 flex items-center gap-3 border-t border-chrome-border pt-6">
           <button
             type="button"
@@ -443,6 +452,142 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Read the OAuth-callback result from the URL (pure — no side effects, safe to
+// run during render in a lazy initializer). Returns the flash message or null.
+function readLinkedInFlash(): string | null {
+  if (typeof window === "undefined") return null;
+  const result = new URLSearchParams(window.location.search).get("linkedin");
+  if (!result) return null;
+  return result === "connected"
+    ? "LinkedIn connected."
+    : result === "cancelled"
+      ? "Connection cancelled."
+      : "Couldn't connect LinkedIn. Please try again.";
+}
+
+function LinkedInSection() {
+  const [status, setStatus] = useState<LinkedInStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Lazy init reads the callback flag once (pure read, no side effects).
+  const [flash, setFlash] = useState<string | null>(readLinkedInFlash);
+
+  useEffect(() => {
+    getLinkedInStatus().then(setStatus).catch(() => setStatus({ connected: false }));
+    if (flash) {
+      // Strip the ?linkedin= param now (side effect belongs in the effect, not
+      // render) so a refresh doesn't re-show the toast.
+      window.history.replaceState({}, "", "/settings");
+      const t = setTimeout(() => setFlash(null), 4000);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleDisconnect() {
+    setBusy(true);
+    try {
+      await disconnectLinkedIn();
+      setStatus({ connected: false });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const connected = status?.connected;
+  const expiresLabel = status?.expiresAt
+    ? new Date(status.expiresAt).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    : null;
+
+  return (
+    <section className="mt-10 border-t border-chrome-border pt-8">
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-chrome-text-strong">
+          LinkedIn
+        </h2>
+        <p className="mt-0.5 text-xs text-chrome-text">
+          Connect your LinkedIn account to post drafts straight to your feed.
+          You post only to your own account.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-chrome-border bg-chrome-light p-5">
+        <div className="flex items-center gap-3.5">
+          <div
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg"
+            style={{ backgroundColor: "var(--chrome)" }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="#0A66C2" aria-hidden="true">
+              <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.13 1.45-2.13 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.45v6.29zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.22.79 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z" />
+            </svg>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            {status === null ? (
+              <Skeleton className="h-4 w-40" />
+            ) : connected ? (
+              <>
+                <p className="text-sm font-medium text-chrome-text-strong">
+                  Connected{status.name ? ` as ${status.name}` : ""}
+                </p>
+                {expiresLabel && (
+                  <p className="mt-0.5 text-xs text-chrome-text">
+                    Access valid until {expiresLabel} — reconnect after that.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-chrome-text">Not connected.</p>
+            )}
+          </div>
+
+          {status !== null && (
+            <div className="flex shrink-0 items-center gap-2">
+              {connected ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={startLinkedInConnect}
+                    className="rounded-lg border border-chrome-border px-3.5 py-2 text-xs font-medium text-chrome-text-strong transition-colors hover:border-chrome-text"
+                    style={{ transitionDuration: "var(--duration-fast)" }}
+                  >
+                    Reconnect
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDisconnect}
+                    disabled={busy}
+                    className="rounded-lg border border-chrome-border px-3.5 py-2 text-xs font-medium text-chrome-text transition-colors hover:border-error hover:text-error disabled:opacity-40"
+                    style={{ transitionDuration: "var(--duration-fast)" }}
+                  >
+                    Disconnect
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={startLinkedInConnect}
+                  className="rounded-lg bg-accent px-4 py-2 text-xs font-medium text-accent-text transition-colors hover:bg-accent-hover"
+                  style={{ transitionDuration: "var(--duration-fast)" }}
+                >
+                  Connect LinkedIn
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {flash && (
+          <p className="mt-3 text-xs font-medium text-accent">{flash}</p>
+        )}
+      </div>
+    </section>
   );
 }
 

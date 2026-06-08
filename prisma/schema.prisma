@@ -25,6 +25,7 @@ model User {
   profile  Profile?
   drafts   Draft[]
   providerSettings ProviderSettings?
+  linkedinConnection LinkedInConnection?
 
   @@map("users")
 }
@@ -80,6 +81,32 @@ model ProviderSettings {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("provider_settings")
+}
+
+// --- LinkedIn connection (per user, for posting on their behalf) ---
+//
+// A standalone OAuth link, separate from app login. accessToken is an
+// AES-256-GCM ciphertext (see src/lib/crypto.ts), never plaintext.
+// linkedinSub is the OIDC "sub" used to build the author URN
+// (urn:li:person:{sub}). refreshToken is usually null — LinkedIn only issues
+// refresh tokens to approved Marketing partners, so we expect ~60-day
+// reconnects rather than silent refresh.
+model LinkedInConnection {
+  id           String   @id @default(cuid())
+  userId       String   @unique @map("user_id")
+  linkedinSub  String   @map("linkedin_sub")
+  name         String   @default("")
+  accessToken  String   @map("access_token")
+  refreshToken String?  @map("refresh_token")
+  expiresAt    DateTime @map("expires_at")
+  scope        String   @default("")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("linkedin_connections")
 }
 
 model Draft {
