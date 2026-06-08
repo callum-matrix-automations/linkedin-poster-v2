@@ -273,3 +273,69 @@ So the split is:
 This means we are **not** building two products. We build one server-backed
 product, then add a thin desktop shell. Everything except the local-proxy call
 is identical between the two clients.
+
+---
+
+## Part 6: Deploy Steps & Operational Notes
+
+Running notes for deploying to Railway. Append to this as new infra is added.
+
+### Railway environment variables (app service)
+
+```
+# AI + external APIs
+OPENAI_API_KEY=<openai key>
+APIFY_API_TOKEN=<apify token>
+TELEGRAM_BOT_TOKEN=<bot token>
+TELEGRAM_CHAT_ID=<chat id>
+
+# Database (Railway Postgres) — use the INTERNAL url in production
+DATABASE_URL=postgresql://postgres:<pw>@postgres.railway.internal:5432/railway
+
+# Auth.js (NextAuth v5)
+AUTH_SECRET=<32-byte base64 secret>   # generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+AUTH_TRUST_HOST=true                  # required behind Railway's proxy
+```
+
+Local dev uses the **public** Postgres URL (`...proxy.rlwy.net:PORT`) in
+`.env.local`; production uses the **internal** URL (`postgres.railway.internal`)
+which is faster and private.
+
+### Database migrations on deploy (IMPORTANT)
+
+Prisma has two separate steps and BOTH must happen:
+
+1. **`prisma generate`** — builds the TypeScript client. Runs automatically via
+   the `postinstall` script on `npm install`. This does NOT touch the database.
+2. **`prisma migrate deploy`** — applies pending migration SQL to the database,
+   creating/altering tables. This MUST run on deploy or the new tables won't
+   exist in production and every DB call 500s.
+
+Add `prisma migrate deploy` to the Railway deploy/release step (or run it once
+manually against the internal DB after a schema change). `migrate deploy` is the
+production-safe command — it only applies committed migrations, never prompts,
+never resets.
+
+All migration SQL files under `prisma/migrations/` are committed to git, so
+production has everything it needs to run `migrate deploy`.
+
+### Gotcha: stale Prisma client (bit us twice)
+
+After any schema change (new model, table rename via `@@map`), the generated
+client must be regenerated or it points at the old shape and throws (e.g.
+`P2021: table does not exist`). `prisma migrate dev` regenerates, but a running
+dev server caches the old client in memory.
+
+**Habit:** after any migration, run `npx prisma generate` and **restart the dev
+server**. If a rename ever misbehaves, a clean regen fixes it:
+`rm -rf src/generated/prisma && npx prisma generate`.
+
+### Things still to wire for a clean production deploy
+
+- [ ] Add `prisma migrate deploy` to the Railway release command.
+- [ ] Rotate any API keys that were pasted in dev chat (OpenAI, Apify) before
+      going beyond private testing.
+- [ ] Confirm `AUTH_TRUST_HOST=true` and a production `AUTH_SECRET` are set.
+- [ ] Decide whether to clear orphaned localStorage keys from the MVP
+      (`linkedin-poster-profile`, `-drafts`, `-history`, `-draft-context`) — they
+      sit unused in users' browsers after the DB migration; harmless but stale.
