@@ -11,11 +11,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!hasCompletedOnboarding()) {
-      router.replace("/onboarding");
-    } else {
-      setReady(true);
-    }
+    hasCompletedOnboarding().then((done) => {
+      if (!done) {
+        router.replace("/onboarding");
+      } else {
+        setReady(true);
+      }
+    });
   }, [router]);
 
   if (!ready) return <div className="min-h-dvh bg-chrome" />;

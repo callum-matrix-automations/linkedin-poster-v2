@@ -1,19 +1,19 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { useEffect, useState, useCallback, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   getProfile,
   getDraft,
-  saveDraft,
+  updateDraftContent,
   finishDraft,
   getDrafts,
   getHistory,
   deleteDraft,
 } from "@/lib/storage";
-import { loadDraftContext } from "@/lib/draft-store";
 import { LinkedInPreview } from "@/components/linkedin-preview";
 import { PostEditor } from "@/components/post-editor";
+import { PostCard } from "@/components/post-card";
 import type { PostSuggestion, LinkedInPost, SavedDraft } from "@/lib/types";
 
 function WriteEditor({ draftId }: { draftId: string }) {
@@ -23,37 +23,46 @@ function WriteEditor({ draftId }: { draftId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<PostSuggestion | null>(null);
+  const [inspirationPosts, setInspirationPosts] = useState<LinkedInPost[]>([]);
+  const [tab, setTab] = useState<"editor" | "inspiration">("editor");
   const [copied, setCopied] = useState(false);
   const [finished, setFinished] = useState(false);
   const [authorName, setAuthorName] = useState("");
   const [authorTitle, setAuthorTitle] = useState("");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const draft = getDraft(draftId);
-    if (!draft) {
-      router.replace("/write");
-      return;
-    }
+    let cancelled = false;
+    (async () => {
+      const [draft, profile] = await Promise.all([getDraft(draftId), getProfile()]);
+      if (cancelled) return;
+      if (!draft) {
+        router.replace("/write");
+        return;
+      }
 
-    const profile = getProfile();
-    setAuthorName(profile.name);
-    setAuthorTitle(profile.title);
-    setSuggestion(draft.suggestion);
-    setFinished(draft.status === "finished");
-    setMounted(true);
+      setAuthorName(profile.name);
+      setAuthorTitle(profile.title);
+      setSuggestion(draft.suggestion);
+      setInspirationPosts(draft.inspirationPosts ?? []);
+      setFinished(draft.status === "finished");
+      setMounted(true);
 
-    if (draft.content) {
-      setContent(draft.content);
-      setLoading(false);
-    } else {
-      const context = loadDraftContext();
-      generateDraft(profile, draft.suggestion, context?.inspirationPosts ?? []);
-    }
+      if (draft.content) {
+        setContent(draft.content);
+        setLoading(false);
+      } else {
+        generateDraft(profile, draft.suggestion, draft.inspirationPosts ?? []);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftId, router]);
 
   async function generateDraft(
-    profile: ReturnType<typeof getProfile>,
+    profile: Awaited<ReturnType<typeof getProfile>>,
     sugg: PostSuggestion,
     posts: LinkedInPost[],
   ) {
@@ -75,7 +84,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
       const data = await res.json();
       const text = data.draft || "";
       setContent(text);
-      persist(text);
+      void updateDraftContent(draftId, text);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate draft");
     } finally {
@@ -83,38 +92,35 @@ function WriteEditor({ draftId }: { draftId: string }) {
     }
   }
 
-  const persist = useCallback(
-    (text: string) => {
-      const draft = getDraft(draftId);
-      if (!draft) return;
-      saveDraft({ ...draft, content: text });
+  const handleDraftChange = useCallback(
+    (value: string) => {
+      setContent(value);
+      // Debounce DB writes while typing.
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        void updateDraftContent(draftId, value);
+      }, 600);
     },
     [draftId],
   );
 
-  const handleDraftChange = useCallback(
-    (value: string) => {
-      setContent(value);
-      persist(value);
-    },
-    [persist],
-  );
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
 
   async function handleRegenerate() {
-    const draft = getDraft(draftId);
-    if (!draft) return;
-    const context = loadDraftContext();
-    const profile = getProfile();
+    const profile = await getProfile();
     setContent("");
-    await generateDraft(
-      profile,
-      draft.suggestion,
-      context?.inspirationPosts ?? [],
-    );
+    await generateDraft(profile, suggestion!, inspirationPosts);
   }
 
-  function handleFinish() {
-    finishDraft(draftId);
+  async function handleFinish() {
+    // Flush any pending content save first.
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    await updateDraftContent(draftId, content);
+    await finishDraft(draftId);
     setFinished(true);
     router.push("/write");
   }
@@ -200,34 +206,97 @@ function WriteEditor({ draftId }: { draftId: string }) {
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 flex-col" style={{ width: "55%" }}>
-          {loading && (
-            <div className="flex flex-1 items-center justify-center">
-              <div className="text-center">
-                <div className="mb-4 inline-block h-6 w-6 animate-spin rounded-full border-2 border-chrome-border border-t-accent" />
-                <p className="text-sm text-chrome-text">Writing your post...</p>
-              </div>
-            </div>
-          )}
+          {/* Editor / Inspiration tabs */}
+          <div className="flex shrink-0 items-center gap-1 border-b border-chrome-border px-4">
+            <button
+              type="button"
+              onClick={() => setTab("editor")}
+              className="border-b-2 px-2 py-2 text-xs font-medium transition-colors"
+              style={{
+                transitionDuration: "var(--duration-fast)",
+                borderColor: tab === "editor" ? "var(--accent)" : "transparent",
+                color:
+                  tab === "editor"
+                    ? "var(--chrome-text-strong)"
+                    : "var(--chrome-text)",
+              }}
+            >
+              Editor
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("inspiration")}
+              className="border-b-2 px-2 py-2 text-xs font-medium transition-colors"
+              style={{
+                transitionDuration: "var(--duration-fast)",
+                borderColor:
+                  tab === "inspiration" ? "var(--accent)" : "transparent",
+                color:
+                  tab === "inspiration"
+                    ? "var(--chrome-text-strong)"
+                    : "var(--chrome-text)",
+              }}
+            >
+              Inspiration{" "}
+              {inspirationPosts.length > 0 && (
+                <span className="text-chrome-text">
+                  ({inspirationPosts.length})
+                </span>
+              )}
+            </button>
+          </div>
 
-          {error && !loading && (
-            <div className="m-4 rounded-lg border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
-              {error}
-              <button
-                type="button"
-                onClick={handleRegenerate}
-                className="ml-2 font-medium underline underline-offset-2"
-              >
-                Retry
-              </button>
-            </div>
-          )}
+          {tab === "editor" ? (
+            <>
+              {loading && (
+                <div className="flex flex-1 items-center justify-center">
+                  <div className="text-center">
+                    <div className="mb-4 inline-block h-6 w-6 animate-spin rounded-full border-2 border-chrome-border border-t-accent" />
+                    <p className="text-sm text-chrome-text">
+                      Writing your post...
+                    </p>
+                  </div>
+                </div>
+              )}
 
-          {!loading && !error && (
-            <PostEditor
-              value={content}
-              onChange={handleDraftChange}
-              placeholder="Start writing your post..."
-            />
+              {error && !loading && (
+                <div className="m-4 rounded-lg border border-error/20 bg-error/5 px-4 py-3 text-sm text-error">
+                  {error}
+                  <button
+                    type="button"
+                    onClick={handleRegenerate}
+                    className="ml-2 font-medium underline underline-offset-2"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {!loading && !error && (
+                <PostEditor
+                  value={content}
+                  onChange={handleDraftChange}
+                  placeholder="Start writing your post..."
+                />
+              )}
+            </>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {inspirationPosts.length === 0 ? (
+                <p className="py-12 text-center text-sm text-chrome-text">
+                  No inspiration posts were saved with this draft.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <p className="text-xs text-chrome-text">
+                    The posts this draft was inspired by.
+                  </p>
+                  {inspirationPosts.map((post) => (
+                    <PostCard key={post.id} post={post} />
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -257,14 +326,16 @@ function DraftList() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setDrafts(getDrafts());
-    setHistory(getHistory());
-    setMounted(true);
+    Promise.all([getDrafts(), getHistory()]).then(([d, h]) => {
+      setDrafts(d);
+      setHistory(h);
+      setMounted(true);
+    });
   }, []);
 
-  function handleDelete(id: string) {
-    deleteDraft(id);
-    setDrafts(getDrafts());
+  async function handleDelete(id: string) {
+    await deleteDraft(id);
+    setDrafts(await getDrafts());
   }
 
   if (!mounted) return <div className="min-h-dvh bg-chrome" />;
@@ -350,7 +421,8 @@ function DraftRow({
   onDelete?: () => void;
 }) {
   const preview = draft.content
-    ? draft.content.slice(0, 100).trimEnd() + (draft.content.length > 100 ? "..." : "")
+    ? draft.content.slice(0, 100).trimEnd() +
+      (draft.content.length > 100 ? "..." : "")
     : "Empty draft";
 
   return (
@@ -358,11 +430,7 @@ function DraftRow({
       className="group flex items-center gap-4 rounded-lg border border-chrome-border bg-chrome-light px-4 py-3 transition-colors hover:border-chrome-text"
       style={{ transitionDuration: "var(--duration-fast)" }}
     >
-      <button
-        type="button"
-        onClick={onOpen}
-        className="min-w-0 flex-1 text-left"
-      >
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
         <div className="mb-1 flex items-center gap-2">
           <span className="truncate text-sm font-medium text-chrome-text-strong">
             {draft.suggestion.title}

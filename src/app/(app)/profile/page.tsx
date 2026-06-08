@@ -73,10 +73,13 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile>(EMPTY_PROFILE);
   const [mounted, setMounted] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setProfile(getProfile());
-    setMounted(true);
+    getProfile().then((p) => {
+      setProfile(p);
+      setMounted(true);
+    });
   }, []);
 
   function update(key: keyof UserProfile, value: string) {
@@ -84,10 +87,16 @@ export default function ProfilePage() {
     setSaved(false);
   }
 
-  function handleSave() {
-    saveProfile(profile);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  async function handleSave() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await saveProfile(profile);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!mounted) return <div className="min-h-dvh bg-chrome" />;
@@ -139,13 +148,14 @@ export default function ProfilePage() {
           <button
             type="button"
             onClick={handleSave}
-            className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover"
+            disabled={saving}
+            className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover disabled:opacity-40"
             style={{
               transitionDuration: "var(--duration-fast)",
               transitionTimingFunction: "var(--ease-out-expo)",
             }}
           >
-            {saved ? "Saved" : "Save changes"}
+            {saving ? "Saving..." : saved ? "Saved" : "Save changes"}
           </button>
           {saved && (
             <span className="text-sm text-accent">Profile updated.</span>

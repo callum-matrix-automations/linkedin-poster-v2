@@ -66,6 +66,7 @@ export interface SavedDraft {
   suggestion: PostSuggestion;
   content: string;
   status: "drafting" | "finished";
+  inspirationPosts: LinkedInPost[];
   createdAt: number;
   updatedAt: number;
 }

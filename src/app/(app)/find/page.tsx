@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { getProfile, saveSearch, getSavedSearch, generateDraftId, saveDraft } from "@/lib/storage";
-import { saveDraftContext, clearCurrentDraft } from "@/lib/draft-store";
+import { getProfile, saveSearch, getSavedSearch, createDraft } from "@/lib/storage";
+import { clearCurrentDraft } from "@/lib/draft-store";
 import { PostCard } from "@/components/post-card";
 import { SuggestionCard } from "@/components/suggestion-card";
 import type { LinkedInPost, PostSuggestion } from "@/lib/types";
@@ -134,6 +134,7 @@ export default function FindPage() {
   const [suggestions, setSuggestions] = useState<PostSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [creatingDraft, setCreatingDraft] = useState(false);
 
   useEffect(() => {
     const saved = getSavedSearch();
@@ -225,7 +226,7 @@ export default function FindPage() {
   async function handleGenerateSuggestions() {
     setSuggestionsLoading(true); setSuggestionsError(null); setSuggestions([]);
     try {
-      const profile = getProfile();
+      const profile = await getProfile();
       const postsForAI = selectedPosts.length > 0 ? selectedPosts : filteredPosts.slice(0, 6);
       const res = await fetch("/api/ai/generate-suggestions", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -239,16 +240,18 @@ export default function FindPage() {
     } finally { setSuggestionsLoading(false); }
   }
 
-  function handleSelectSuggestion(suggestion: PostSuggestion) {
-    const postsForContext = selectedPosts.length > 0 ? selectedPosts : filteredPosts.slice(0, 6);
-    const draftId = generateDraftId();
-    saveDraft({
-      id: draftId, suggestion, content: "", status: "drafting",
-      createdAt: Date.now(), updatedAt: Date.now(),
-    });
-    saveDraftContext({ suggestion, inspirationPosts: postsForContext });
-    clearCurrentDraft();
-    router.push(`/write?id=${draftId}`);
+  async function handleSelectSuggestion(suggestion: PostSuggestion) {
+    if (creatingDraft) return;
+    setCreatingDraft(true);
+    try {
+      const postsForContext =
+        selectedPosts.length > 0 ? selectedPosts : filteredPosts.slice(0, 6);
+      const draft = await createDraft(suggestion, postsForContext);
+      clearCurrentDraft();
+      router.push(`/write?id=${draft.id}`);
+    } catch {
+      setCreatingDraft(false);
+    }
   }
 
   return (

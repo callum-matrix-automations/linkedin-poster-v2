@@ -22,8 +22,53 @@ model User {
 
   accounts Account[]
   sessions Session[]
+  profile  Profile?
+  drafts   Draft[]
 
   @@map("users")
+}
+
+// --- App data (per user) ---
+
+model Profile {
+  id                 String  @id @default(cuid())
+  userId             String  @unique @map("user_id")
+  name               String  @default("")
+  title              String  @default("")
+  industry           String  @default("")
+  targetAudience     String  @default("") @map("target_audience")
+  uniqueBackground   String  @default("") @map("unique_background")
+  contrarian         String  @default("")
+  personalStory      String  @default("") @map("personal_story")
+  expertise          String  @default("")
+  tone               String  @default("")
+  completedOnboarding Boolean @default(false) @map("completed_onboarding")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model Draft {
+  id      String @id @default(cuid())
+  userId  String @map("user_id")
+  content String @default("")
+  status  String @default("drafting") // "drafting" | "finished"
+
+  // The PostSuggestion that seeded this draft (title, hook, angle, type).
+  suggestion Json
+  // The LinkedInPost[] used as inspiration for this draft.
+  inspirationPosts Json @map("inspiration_posts")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("posts")
 }
 
 model Account {

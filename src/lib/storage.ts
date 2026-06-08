@@ -1,41 +1,49 @@
 import { UserProfile, EMPTY_PROFILE, LinkedInPost, SavedDraft, SavedSearch } from "./types";
 
-const PROFILE_KEY = "linkedin-poster-profile";
+// Last search results stay client-side (transient cache, not user data).
 const SEARCH_KEY = "linkedin-poster-search";
-const DRAFTS_KEY = "linkedin-poster-drafts";
-const HISTORY_KEY = "linkedin-poster-history";
 
-// --- Profile ---
+// --- Profile (DB-backed via /api/profile) ---
 
-export function getProfile(): UserProfile {
-  if (typeof window === "undefined") return EMPTY_PROFILE;
+export async function getProfile(): Promise<UserProfile> {
   try {
-    const raw = localStorage.getItem(PROFILE_KEY);
-    if (!raw) return EMPTY_PROFILE;
-    return { ...EMPTY_PROFILE, ...JSON.parse(raw) };
+    const res = await fetch("/api/profile");
+    if (!res.ok) return EMPTY_PROFILE;
+    const data = await res.json();
+    return { ...EMPTY_PROFILE, ...data.profile };
   } catch {
     return EMPTY_PROFILE;
   }
 }
 
-export function saveProfile(profile: UserProfile): void {
-  localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+export async function saveProfile(
+  profile: Partial<UserProfile>,
+): Promise<UserProfile> {
+  const res = await fetch("/api/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  if (!res.ok) throw new Error("Failed to save profile");
+  const data = await res.json();
+  return { ...EMPTY_PROFILE, ...data.profile };
 }
 
-export function updateProfile(updates: Partial<UserProfile>): UserProfile {
-  const current = getProfile();
-  const updated = { ...current, ...updates };
-  saveProfile(updated);
-  return updated;
+export async function updateProfile(
+  updates: Partial<UserProfile>,
+): Promise<UserProfile> {
+  return saveProfile(updates);
 }
 
-export function hasCompletedOnboarding(): boolean {
-  return getProfile().completedOnboarding;
+export async function hasCompletedOnboarding(): Promise<boolean> {
+  const profile = await getProfile();
+  return profile.completedOnboarding;
 }
 
-// --- Found Posts (last search) ---
+// --- Found Posts (last search) — localStorage only ---
 
 export function getSavedSearch(): SavedSearch | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(SEARCH_KEY);
     if (!raw) return null;
@@ -54,84 +62,69 @@ export function clearSearch(): void {
   localStorage.removeItem(SEARCH_KEY);
 }
 
-// --- Drafts (in progress) ---
+// --- Drafts + History (DB-backed via /api/drafts) ---
 
-function loadDrafts(): SavedDraft[] {
-  try {
-    const raw = localStorage.getItem(DRAFTS_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+export async function getDrafts(): Promise<SavedDraft[]> {
+  const res = await fetch("/api/drafts?status=drafting");
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.drafts ?? [];
 }
 
-function writeDrafts(drafts: SavedDraft[]): void {
-  localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+export async function getHistory(): Promise<SavedDraft[]> {
+  const res = await fetch("/api/drafts?status=finished");
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.drafts ?? [];
 }
 
-export function getDrafts(): SavedDraft[] {
-  return loadDrafts().filter((d) => d.status === "drafting");
+export async function getDraft(id: string): Promise<SavedDraft | null> {
+  const res = await fetch(`/api/drafts/${id}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.draft ?? null;
 }
 
-export function getDraft(id: string): SavedDraft | null {
-  return loadDrafts().find((d) => d.id === id) || null;
+/** Create a new drafting draft from a suggestion + inspiration posts. */
+export async function createDraft(
+  suggestion: SavedDraft["suggestion"],
+  inspirationPosts: LinkedInPost[],
+): Promise<SavedDraft> {
+  const res = await fetch("/api/drafts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ suggestion, inspirationPosts, content: "" }),
+  });
+  if (!res.ok) throw new Error("Failed to create draft");
+  const data = await res.json();
+  return data.draft;
 }
 
-export function saveDraft(draft: SavedDraft): void {
-  const drafts = loadDrafts();
-  const index = drafts.findIndex((d) => d.id === draft.id);
-  if (index >= 0) {
-    drafts[index] = { ...draft, updatedAt: Date.now() };
-  } else {
-    drafts.push(draft);
-  }
-  writeDrafts(drafts);
+/** Update a draft's content. */
+export async function updateDraftContent(
+  id: string,
+  content: string,
+): Promise<void> {
+  await fetch(`/api/drafts/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
 }
 
-export function deleteDraft(id: string): void {
-  writeDrafts(loadDrafts().filter((d) => d.id !== id));
+export async function deleteDraft(id: string): Promise<void> {
+  await fetch(`/api/drafts/${id}`, { method: "DELETE" });
 }
 
-export function generateDraftId(): string {
-  return `draft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+/** Mark a draft as finished (moves it to history). */
+export async function finishDraft(id: string): Promise<void> {
+  await fetch(`/api/drafts/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "finished" }),
+  });
 }
 
-// --- History (finished posts) ---
-
-function loadHistory(): SavedDraft[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-function writeHistory(history: SavedDraft[]): void {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-}
-
-export function getHistory(): SavedDraft[] {
-  return loadHistory().sort((a, b) => b.updatedAt - a.updatedAt);
-}
-
-export function finishDraft(id: string): void {
-  const drafts = loadDrafts();
-  const draft = drafts.find((d) => d.id === id);
-  if (!draft) return;
-
-  draft.status = "finished";
-  draft.updatedAt = Date.now();
-
-  writeDrafts(drafts.filter((d) => d.id !== id));
-
-  const history = loadHistory();
-  history.push(draft);
-  writeHistory(history);
-}
-
-export function deleteHistoryItem(id: string): void {
-  writeHistory(loadHistory().filter((d) => d.id !== id));
+export async function deleteHistoryItem(id: string): Promise<void> {
+  await deleteDraft(id);
 }

@@ -24,10 +24,13 @@ export default function OnboardingPage() {
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState<UserProfile>(EMPTY_PROFILE);
   const [mounted, setMounted] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setProfile(getProfile());
-    setMounted(true);
+    getProfile().then((p) => {
+      setProfile(p);
+      setMounted(true);
+    });
   }, []);
 
   const update = useCallback(
@@ -56,14 +59,18 @@ export default function OnboardingPage() {
     }
   })();
 
-  function handleNext() {
-    if (!canProceed) return;
+  async function handleNext() {
+    if (!canProceed || saving) return;
     if (step < TOTAL_STEPS - 1) {
       setStep(step + 1);
     } else {
-      const completed = { ...profile, completedOnboarding: true };
-      saveProfile(completed);
-      router.push("/find");
+      setSaving(true);
+      try {
+        await saveProfile({ ...profile, completedOnboarding: true });
+        router.push("/find");
+      } catch {
+        setSaving(false);
+      }
     }
   }
 
@@ -210,8 +217,8 @@ export default function OnboardingPage() {
           description="Pick the voice that feels most like you. We'll use this to shape how your posts read."
           onNext={handleNext}
           onBack={handleBack}
-          canProceed={canProceed}
-          nextLabel="Finish setup"
+          canProceed={canProceed && !saving}
+          nextLabel={saving ? "Saving..." : "Finish setup"}
         >
           <ChipSelect
             options={TONE_OPTIONS}

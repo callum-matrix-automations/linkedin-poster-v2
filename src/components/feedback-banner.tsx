@@ -50,7 +50,7 @@ export function FeedbackBanner() {
     setError(null);
 
     try {
-      const profile = getProfile();
+      const profile = await getProfile();
       const res = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

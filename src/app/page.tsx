@@ -8,11 +8,9 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    if (hasCompletedOnboarding()) {
-      router.replace("/find");
-    } else {
-      router.replace("/onboarding");
-    }
+    hasCompletedOnboarding().then((done) => {
+      router.replace(done ? "/find" : "/onboarding");
+    });
   }, [router]);
 
   return <div className="min-h-dvh bg-chrome" />;

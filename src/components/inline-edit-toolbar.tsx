@@ -47,7 +47,7 @@ export function InlineEditToolbar({
     onStartStream();
 
     try {
-      const profile = getProfile();
+      const profile = await getProfile();
       const res = await fetch("/api/ai/inline-edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
