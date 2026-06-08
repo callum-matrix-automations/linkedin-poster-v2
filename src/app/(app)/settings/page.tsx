@@ -10,6 +10,7 @@ import {
   type SafeProviderSettings,
 } from "@/lib/provider-settings";
 import { SettingsSkeleton, Skeleton } from "@/components/skeleton";
+import { useNavGuard } from "@/components/nav-guard";
 import {
   getLinkedInStatus,
   disconnectLinkedIn,
@@ -32,8 +33,6 @@ function isKeyed(id: ProviderId): id is Provider {
 
 export default function SettingsPage() {
   const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Which provider generation uses. "" until the user picks one.
@@ -80,12 +79,27 @@ export default function SettingsPage() {
     gemini: "idle",
   });
 
+  const { setBlocker } = useNavGuard();
+
   useEffect(() => {
     getProviderSettings()
       .then(applySettings)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"))
       .finally(() => setLoaded(true));
   }, []);
+
+  // Guard leaving Settings when a key is saved but no provider is active —
+  // otherwise every AI call fails with "no provider set up". Re-registered as
+  // state changes so the closure reads current values; cleared on unmount.
+  useEffect(() => {
+    const keyConfigured = KEYED.some((p) => configured[p]);
+    setBlocker(() =>
+      keyConfigured && !activeProvider
+        ? "You've added an API key but haven't pressed “Use this” on a provider. Until you do, you won't be able to generate posts."
+        : null,
+    );
+    return () => setBlocker(null);
+  }, [configured, activeProvider, setBlocker]);
 
   function applySettings(s: SafeProviderSettings) {
     setActiveProvider(s.activeProvider);
@@ -135,10 +149,19 @@ export default function SettingsPage() {
       setError(e instanceof Error ? e.message : "Failed to save key");
     }
   }
-  function setModel(id: Provider, value: string) {
-    setModels((prev) => ({ ...prev, [id]: value }));
-    setSaved(false);
+  // Model choice persists immediately too, so the whole screen auto-saves and
+  // there's no separate Save step that can be forgotten.
+  async function setModel(id: Provider, value: string) {
+    const prevModels = models;
+    const nextModels = { ...models, [id]: value };
+    setModels(nextModels); // optimistic
     resetTest(id);
+    try {
+      await saveProviderSettings({ models: { [id]: value } });
+    } catch (e) {
+      setModels(prevModels); // revert on failure
+      setError(e instanceof Error ? e.message : "Failed to save model");
+    }
   }
 
   async function handleTest(id: Provider) {
@@ -167,35 +190,32 @@ export default function SettingsPage() {
   function startEditing(id: Provider) {
     setEditing((prev) => ({ ...prev, [id]: true }));
   }
-  function chooseActive(id: string) {
-    setActiveProvider(id);
-    setSaved(false);
-  }
-
-  // Keys persist on blur (handleKeyBlur). The Save bar only commits the active
-  // provider choice and model selections.
-  async function handleSave() {
-    if (saving) return;
-    setSaving(true);
+  // Selecting a provider persists immediately (like keys-on-blur), so the user
+  // can't get stuck with a configured-but-unsaved active provider.
+  async function chooseActive(id: string) {
+    const prev = activeProvider;
+    setActiveProvider(id); // optimistic
     setError(null);
     try {
-      const next = await saveProviderSettings({ activeProvider, models });
+      const next = await saveProviderSettings({ activeProvider: id, models });
       applySettings(next);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save settings");
-    } finally {
-      setSaving(false);
+      setActiveProvider(prev); // revert on failure
+      setError(e instanceof Error ? e.message : "Failed to set active provider");
     }
   }
 
   if (!loaded) return <SettingsSkeleton />;
 
+  const anyKeyConfigured = KEYED.some((p) => configured[p]);
+  // The trap we're guarding: keys saved but no provider marked active, so AI
+  // calls fail with "no provider set up".
+  const needsActiveSelection = anyKeyConfigured && !activeProvider;
+
   return (
     <div className="min-h-dvh bg-chrome px-6 py-12">
       <div className="mx-auto max-w-2xl">
-        <header className="mb-10">
+        <header className="mb-6">
           <h1 className="mb-2 text-2xl font-semibold tracking-tight text-chrome-text-strong">
             Settings
           </h1>
@@ -204,6 +224,39 @@ export default function SettingsPage() {
             posts. Keys are stored against your account and never shared.
           </p>
         </header>
+
+        {/* Active-provider status banner */}
+        {needsActiveSelection ? (
+          <div className="mb-8 flex items-start gap-3 rounded-xl border border-accent/40 bg-accent/5 px-4 py-3">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-accent" aria-hidden="true">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <div className="text-sm">
+              <p className="font-medium text-chrome-text-strong">
+                No AI provider selected
+              </p>
+              <p className="mt-0.5 text-chrome-text">
+                You&apos;ve saved a key, but you must press{" "}
+                <span className="font-medium text-chrome-text-strong">Use this</span>{" "}
+                on a provider below to generate posts.
+              </p>
+            </div>
+          </div>
+        ) : activeProvider ? (
+          <div className="mb-8 flex items-center gap-2 rounded-xl border border-success/30 bg-success/5 px-4 py-3 text-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-success" aria-hidden="true">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+            <span className="text-chrome-text">
+              Generating with{" "}
+              <span className="font-medium text-chrome-text-strong">
+                {PROVIDERS.find((p) => p.id === activeProvider)?.name ?? activeProvider}
+              </span>
+              .
+            </span>
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-4">
           {PROVIDERS.map((provider) => {
@@ -266,30 +319,35 @@ export default function SettingsPage() {
                     </p>
                   </div>
 
-                  {/* Use-this toggle */}
+                  {/* Use-this toggle. Filled gold when selectable-but-inactive
+                      so it clearly invites the click; subtle outline once active. */}
                   {!provider.requiresDesktopApp && (
                     <button
                       type="button"
                       onClick={() => keyed && chooseActive(provider.id)}
                       disabled={isActive || !selectable}
-                      className="shrink-0 rounded-lg border px-3.5 py-2 text-xs font-medium transition-all disabled:cursor-not-allowed"
+                      className="shrink-0 rounded-lg border px-3.5 py-2 text-xs font-semibold transition-all disabled:cursor-not-allowed"
                       style={{
                         transitionDuration: "var(--duration-fast)",
                         transitionTimingFunction: "var(--ease-out-expo)",
                         borderColor: isActive
                           ? "var(--accent)"
-                          : "var(--chrome-border)",
+                          : selectable
+                            ? "var(--accent)"
+                            : "var(--chrome-border)",
                         color: isActive
                           ? "var(--accent)"
-                          : !selectable
-                            ? "oklch(45% 0.01 80)"
-                            : "var(--chrome-text-strong)",
+                          : selectable
+                            ? "var(--accent-text)"
+                            : "oklch(45% 0.01 80)",
                         backgroundColor: isActive
                           ? "oklch(80% 0.13 86 / 0.12)"
-                          : "transparent",
+                          : selectable
+                            ? "var(--accent)"
+                            : "transparent",
                       }}
                     >
-                      {isActive ? "In use" : "Use this"}
+                      {isActive ? "✓ In use" : "Use this"}
                     </button>
                   )}
                 </div>
@@ -426,29 +484,13 @@ export default function SettingsPage() {
         {/* LinkedIn connection (separate from AI provider settings) */}
         <LinkedInSection />
 
-        {/* Save bar (AI provider + model only — keys & LinkedIn save on their own) */}
-        <div className="mt-10 flex items-center gap-3 border-t border-chrome-border pt-6">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover disabled:opacity-40"
-            style={{
-              transitionDuration: "var(--duration-fast)",
-              transitionTimingFunction: "var(--ease-out-expo)",
-            }}
-          >
-            {saving ? "Saving..." : saved ? "Saved" : "Save settings"}
-          </button>
-          {saved ? (
-            <span className="text-sm text-accent">Settings saved.</span>
-          ) : (
-            <span className="text-xs text-chrome-text">
-              Saves your provider and model choice. API keys save automatically
-              when entered.
-            </span>
-          )}
-          {error && <span className="text-sm text-error">{error}</span>}
+        {/* Everything auto-saves: keys on blur, provider/model on selection. */}
+        <div className="mt-8 flex items-center gap-2 border-t border-chrome-border pt-5 text-xs text-chrome-text">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          Changes save automatically.
+          {error && <span className="ml-2 text-error">{error}</span>}
         </div>
       </div>
     </div>

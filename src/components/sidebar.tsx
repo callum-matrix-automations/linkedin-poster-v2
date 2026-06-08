@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { signOut } from "next-auth/react";
+import { useNavGuard } from "@/components/nav-guard";
 
 const NAV_ITEMS = [
   {
@@ -50,6 +51,7 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { attemptNavigate } = useNavGuard();
 
   return (
     <aside className="flex h-full w-14 shrink-0 flex-col items-center border-r border-chrome-border bg-chrome py-4">
@@ -73,6 +75,14 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               title={item.label}
+              onClick={(e) => {
+                // Route through the nav guard so a page (e.g. Settings without
+                // an active provider) can intercept and confirm before leaving.
+                if (item.href !== pathname) {
+                  e.preventDefault();
+                  attemptNavigate(item.href);
+                }
+              }}
               className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
                 isActive
                   ? "bg-chrome-light text-accent"

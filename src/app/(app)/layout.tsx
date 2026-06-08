@@ -5,19 +5,22 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { FeedbackBanner } from "@/components/feedback-banner";
 import { AppDataProvider, useProfile } from "@/components/app-data-provider";
+import { NavGuardProvider } from "@/components/nav-guard";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppDataProvider>
-      <div className="flex h-dvh flex-col">
-        <FeedbackBanner />
-        <div className="flex min-h-0 flex-1">
-          <Sidebar />
-          <main className="min-h-0 flex-1 overflow-y-auto">
-            <OnboardingGate>{children}</OnboardingGate>
-          </main>
+      <NavGuardProvider>
+        <div className="flex h-dvh flex-col">
+          <FeedbackBanner />
+          <div className="flex min-h-0 flex-1">
+            <Sidebar />
+            <main className="min-h-0 flex-1 overflow-y-auto">
+              <OnboardingGate>{children}</OnboardingGate>
+            </main>
+          </div>
         </div>
-      </div>
+      </NavGuardProvider>
     </AppDataProvider>
   );
 }
