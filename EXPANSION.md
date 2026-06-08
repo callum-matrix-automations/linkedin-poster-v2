@@ -353,7 +353,9 @@ server**. If a rename ever misbehaves, a clean regen fixes it:
 
 ### Things still to wire for a clean production deploy
 
-- [ ] Add `prisma migrate deploy` to the Railway release command.
+- [x] Add `prisma migrate deploy` to the deploy. Done via the `start` script
+      (`prisma migrate deploy && next start`) so migrations apply on each boot,
+      before the server accepts traffic.
 - [ ] Rotate any API keys that were pasted in dev chat (OpenAI, Apify) before
       going beyond private testing.
 - [ ] Confirm `AUTH_TRUST_HOST=true` and a production `AUTH_SECRET` are set.
