@@ -65,12 +65,16 @@ export interface SavedDraft {
   id: string;
   suggestion: PostSuggestion;
   content: string;
-  status: "drafting" | "finished";
+  status: "drafting" | "scheduled" | "finished" | "failed";
   inspirationPosts: LinkedInPost[];
   // Optional generated image. imageData is base64 (no data: prefix).
   imageData: string | null;
   imageMime: string | null;
   imageAlt: string | null;
+  // Scheduling. scheduledFor is epoch ms (UTC) when status is "scheduled".
+  scheduledFor: number | null;
+  linkedinUrl: string | null;
+  failedReason: string | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -113,7 +113,8 @@ model Draft {
   id      String @id @default(cuid())
   userId  String @map("user_id")
   content String @default("")
-  status  String @default("drafting") // "drafting" | "finished"
+  // "drafting" | "scheduled" | "finished" | "failed"
+  status  String @default("drafting")
 
   // The PostSuggestion that seeded this draft (title, hook, angle, type).
   suggestion Json
@@ -126,12 +127,21 @@ model Draft {
   imageMime String? @map("image_mime")
   imageAlt  String? @map("image_alt")
 
+  // Scheduling: when status is "scheduled", scheduledFor is the UTC time the
+  // post should publish. linkedinUrl is set after a successful publish;
+  // failedReason holds the error when status is "failed".
+  scheduledFor DateTime? @map("scheduled_for")
+  linkedinUrl  String?   @map("linkedin_url")
+  failedReason String?   @map("failed_reason")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status])
+  // Lets the cron query efficiently fetch posts due to publish.
+  @@index([status, scheduledFor])
   @@map("posts")
 }
 

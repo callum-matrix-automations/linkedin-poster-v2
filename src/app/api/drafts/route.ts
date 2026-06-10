@@ -13,18 +13,24 @@ function toSavedDraft(d: {
   imageData: string | null;
   imageMime: string | null;
   imageAlt: string | null;
+  scheduledFor: Date | null;
+  linkedinUrl: string | null;
+  failedReason: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): SavedDraft {
   return {
     id: d.id,
     content: d.content,
-    status: d.status as "drafting" | "finished",
+    status: d.status as SavedDraft["status"],
     suggestion: d.suggestion as SavedDraft["suggestion"],
     inspirationPosts: d.inspirationPosts as SavedDraft["inspirationPosts"],
     imageData: d.imageData,
     imageMime: d.imageMime,
     imageAlt: d.imageAlt,
+    scheduledFor: d.scheduledFor ? d.scheduledFor.getTime() : null,
+    linkedinUrl: d.linkedinUrl,
+    failedReason: d.failedReason,
     createdAt: d.createdAt.getTime(),
     updatedAt: d.updatedAt.getTime(),
   };
@@ -43,7 +49,9 @@ const createSchema = z.object({
   content: z.string().default(""),
 });
 
-// GET /api/drafts?status=drafting|finished  (omit for all)
+const LIST_STATUSES = ["drafting", "scheduled", "finished", "failed"];
+
+// GET /api/drafts?status=drafting|scheduled|finished|failed  (omit for all)
 export async function GET(request: NextRequest) {
   const userId = await getUserId();
   if (!userId) {
@@ -53,12 +61,16 @@ export async function GET(request: NextRequest) {
   const status = request.nextUrl.searchParams.get("status");
   const where = {
     userId,
-    ...(status === "drafting" || status === "finished" ? { status } : {}),
+    ...(status && LIST_STATUSES.includes(status) ? { status } : {}),
   };
 
   const drafts = await prisma.draft.findMany({
     where,
-    orderBy: { updatedAt: "desc" },
+    // Scheduled posts read best soonest-first; others newest-first.
+    orderBy:
+      status === "scheduled"
+        ? { scheduledFor: "asc" }
+        : { updatedAt: "desc" },
   });
 
   return NextResponse.json({ drafts: drafts.map(toSavedDraft) });

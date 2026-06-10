@@ -8,13 +8,18 @@ import {
   updateDraftImage,
   finishDraft,
   deleteDraft,
+  scheduleDraft,
+  cancelScheduledDraft,
 } from "@/lib/storage";
+import { ScheduleDialog } from "@/components/schedule-dialog";
+import { formatInZone } from "@/lib/timezone";
 import { ImageComposer, type DraftImage } from "@/components/image-composer";
 import { toDataUrl } from "@/lib/image-client";
 import {
   useProfile,
   useDrafts,
   useHistory,
+  useScheduled,
 } from "@/components/app-data-provider";
 import { LinkedInPreview } from "@/components/linkedin-preview";
 import { PostEditor } from "@/components/post-editor";
@@ -46,6 +51,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
   const { profile } = useProfile();
   const { refresh: refreshDrafts } = useDrafts();
   const { refresh: refreshHistory } = useHistory();
+  const { refresh: refreshScheduled } = useScheduled();
   const [mounted, setMounted] = useState(false);
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
@@ -73,6 +79,9 @@ function WriteEditor({ draftId }: { draftId: string }) {
   // Image creator: the draft's attached image + whether the panel is open.
   const [image, setImage] = useState<DraftImage | null>(null);
   const [showImagePanel, setShowImagePanel] = useState(false);
+  // Scheduling: the draft's current scheduled time (ms) + dialog visibility.
+  const [scheduledFor, setScheduledFor] = useState<number | null>(null);
+  const [showSchedule, setShowSchedule] = useState(false);
   // Author identity comes from the cached profile; falls back to empty until loaded.
   const authorName = profile?.name ?? "";
   const authorTitle = profile?.title ?? "";
@@ -96,6 +105,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
       setFinished(isFinished);
       // Finished posts open locked (read-only) until the user clicks Edit.
       setLocked(isFinished);
+      setScheduledFor(draft.scheduledFor);
       // Load any saved image; open the panel if one exists.
       if (draft.imageData && draft.imageMime) {
         setImage({
@@ -286,6 +296,24 @@ function WriteEditor({ draftId }: { draftId: string }) {
     setShowPublish(true);
   }
 
+  async function handleSchedule(utcMs: number) {
+    // Flush any pending content edits first so the scheduled post has them.
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    await updateDraftContent(draftId, content);
+    await scheduleDraft(draftId, utcMs);
+    setScheduledFor(utcMs);
+    setShowSchedule(false);
+    // Refresh the lists so the post moves into the Scheduled section.
+    await Promise.all([refreshDrafts(), refreshScheduled()]);
+    router.push("/write");
+  }
+
+  async function handleCancelSchedule() {
+    await cancelScheduledDraft(draftId);
+    setScheduledFor(null);
+    await Promise.all([refreshDrafts(), refreshScheduled()]);
+  }
+
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(content);
@@ -428,32 +456,55 @@ function WriteEditor({ draftId }: { draftId: string }) {
             </>
           )}
 
-          {/* Post to LinkedIn — hidden while actively editing a finished post
-              (save first), shown otherwise. */}
+          {/* Schedule + Post to LinkedIn — hidden while actively editing a
+              finished post (save first), shown otherwise. */}
           {!(finished && !locked) && (
-            <button
-              type="button"
-              onClick={handlePostToLinkedIn}
-              disabled={!content || loading}
-              title={
-                linkedinReady === false
-                  ? "Connect LinkedIn in Settings to post"
-                  : "Post this to your LinkedIn feed"
-              }
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover disabled:opacity-30"
-              style={{
-                transitionDuration: "var(--duration-fast)",
-                transitionTimingFunction: "var(--ease-out-expo)",
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.13 1.45-2.13 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.45v6.29zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.22.79 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z" />
-              </svg>
-              {linkedinReady === false ? "Connect to post" : "Post to LinkedIn"}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowSchedule(true)}
+                disabled={!content || loading}
+                title="Schedule this post for later"
+                className="flex items-center gap-1.5 rounded-lg border border-chrome-border px-3 py-1.5 text-sm text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong disabled:opacity-30"
+                style={{ transitionDuration: "var(--duration-fast)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                </svg>
+                {scheduledFor ? "Reschedule" : "Schedule"}
+              </button>
+              <button
+                type="button"
+                onClick={handlePostToLinkedIn}
+                disabled={!content || loading}
+                title={
+                  linkedinReady === false
+                    ? "Connect LinkedIn in Settings to post"
+                    : "Post this to your LinkedIn feed"
+                }
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover disabled:opacity-30"
+                style={{
+                  transitionDuration: "var(--duration-fast)",
+                  transitionTimingFunction: "var(--ease-out-expo)",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.13 1.45-2.13 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.45v6.29zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.22.79 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z" />
+                </svg>
+                {linkedinReady === false ? "Connect to post" : "Post to LinkedIn"}
+              </button>
+            </>
           )}
         </div>
       </header>
+
+      {showSchedule && (
+        <ScheduleDialog
+          initialMs={scheduledFor}
+          onClose={() => setShowSchedule(false)}
+          onSchedule={handleSchedule}
+        />
+      )}
 
       {showPublish && (
         <LinkedInPublishDialog
@@ -557,6 +608,27 @@ function WriteEditor({ draftId }: { draftId: string }) {
                       This finished post is read-only. Press{" "}
                       <span className="font-medium text-chrome-text-strong">Edit</span>{" "}
                       to make changes.
+                    </div>
+                  )}
+                  {scheduledFor && (
+                    <div className="flex items-center gap-2 border-b border-accent/30 bg-accent/5 px-4 py-2 text-xs text-chrome-text">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
+                        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+                      </svg>
+                      <span className="flex-1">
+                        Scheduled for{" "}
+                        <span className="font-medium text-chrome-text-strong">
+                          {formatInZone(scheduledFor)}
+                        </span>
+                        . Edits here update the scheduled post.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCancelSchedule}
+                        className="font-medium text-chrome-text underline underline-offset-2 hover:text-error"
+                      >
+                        Cancel schedule
+                      </button>
                     </div>
                   )}
                   {hashtagError && (
@@ -666,6 +738,7 @@ function DraftList() {
   const router = useRouter();
   const { drafts, loading: draftsLoading, removeFromCache } = useDrafts();
   const { history, loading: historyLoading } = useHistory();
+  const { scheduled, loading: scheduledLoading } = useScheduled();
 
   async function handleDelete(id: string) {
     // Optimistically drop from the cache, then persist.
@@ -674,12 +747,21 @@ function DraftList() {
   }
 
   // First load (no cached data yet) shows the ghost list.
-  if ((draftsLoading && drafts === null) || (historyLoading && history === null)) {
+  if (
+    (draftsLoading && drafts === null) ||
+    (historyLoading && history === null) ||
+    (scheduledLoading && scheduled === null)
+  ) {
     return <DraftListSkeleton />;
   }
 
   const draftList = drafts ?? [];
   const historyList = history ?? [];
+  // The scheduled query returns pending posts; a fired-but-failed post flips to
+  // "failed" status, which we surface separately in the same section.
+  const scheduledAll = scheduled ?? [];
+  const scheduledList = scheduledAll.filter((d) => d.status === "scheduled");
+  const failedList = scheduledAll.filter((d) => d.status === "failed");
 
   return (
     <div className="min-h-dvh bg-chrome px-6 py-12">
@@ -728,6 +810,46 @@ function DraftList() {
           )}
         </section>
 
+        {scheduledList.length > 0 && (
+          <section className="mb-12">
+            <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-chrome-text">
+              Scheduled
+            </h2>
+            <div className="flex flex-col gap-2">
+              {scheduledList.map((d) => (
+                <DraftRow
+                  key={d.id}
+                  draft={d}
+                  scheduledLabel={
+                    d.scheduledFor ? formatInZone(d.scheduledFor) : undefined
+                  }
+                  onOpen={() => router.push(`/write?id=${d.id}`)}
+                  onDelete={() => handleDelete(d.id)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {failedList.length > 0 && (
+          <section className="mb-12">
+            <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-error">
+              Failed to post
+            </h2>
+            <div className="flex flex-col gap-2">
+              {failedList.map((d) => (
+                <DraftRow
+                  key={d.id}
+                  draft={d}
+                  failedReason={d.failedReason ?? "Posting failed"}
+                  onOpen={() => router.push(`/write?id=${d.id}`)}
+                  onDelete={() => handleDelete(d.id)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
         {historyList.length > 0 && (
           <section>
             <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-chrome-text">
@@ -754,12 +876,16 @@ function DraftList() {
 function DraftRow({
   draft,
   finished,
+  scheduledLabel,
+  failedReason,
   onOpen,
   onDelete,
   onPostToLinkedIn,
 }: {
   draft: SavedDraft;
   finished?: boolean;
+  scheduledLabel?: string;
+  failedReason?: string;
   onOpen: () => void;
   onDelete?: () => void;
   onPostToLinkedIn?: () => void;
@@ -784,8 +910,25 @@ function DraftRow({
               Done
             </span>
           )}
+          {draft.imageData && (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-chrome-text" aria-label="Has image">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+            </svg>
+          )}
         </div>
-        <p className="truncate text-xs text-chrome-text">{preview}</p>
+        {scheduledLabel ? (
+          <p className="flex items-center gap-1.5 truncate text-xs text-accent">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+            </svg>
+            {scheduledLabel}
+          </p>
+        ) : failedReason ? (
+          <p className="truncate text-xs text-error">{failedReason}</p>
+        ) : (
+          <p className="truncate text-xs text-chrome-text">{preview}</p>
+        )}
       </button>
       {onPostToLinkedIn && (
         <button

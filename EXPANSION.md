@@ -364,6 +364,10 @@ ENCRYPTION_KEY=<32-byte base64 secret>  # same generator as AUTH_SECRET, but a D
 LINKEDIN_CLIENT_ID=<from LinkedIn app Auth tab>
 LINKEDIN_CLIENT_SECRET=<from LinkedIn app Auth tab>
 LINKEDIN_REDIRECT_URI=https://<railway-domain>/api/linkedin/callback
+
+# Scheduled posts: shared secret guarding the cron endpoint. Set on BOTH the
+# web service and the cron service (must match).
+CRON_SECRET=<random secret>
 ```
 
 The LinkedIn redirect URI must **exactly match** one registered in the app's
@@ -412,11 +416,49 @@ dev server caches the old client in memory.
 server**. If a rename ever misbehaves, a clean regen fixes it:
 `rm -rf src/generated/prisma && npx prisma generate`.
 
+### Scheduled posts: the cron service (second Railway service)
+
+LinkedIn's API has **no native scheduling** (verified: `lifecycleState: PUBLISHED`
+= publish now, no future-timestamp field). So we self-schedule: posts are stored
+with `status: "scheduled"` + a UTC `scheduledFor`, and a cron fires due ones.
+
+Railway cron **cannot run on the always-on web service** (cron requires the
+service to start, do its job, and exit — a web server never exits, so every
+tick would be skipped). And Railway cron's **minimum interval is 5 minutes**.
+So the setup is a **separate Railway service in the same project/repo**:
+
+1. **Web service** (existing) — exposes `POST /api/cron/publish-scheduled`,
+   guarded by `CRON_SECRET` (header `x-cron-secret`). Queries due posts,
+   publishes each (reusing the normal publish path), marks them
+   `finished` (with `linkedin_url`) or `failed` (with `failed_reason`).
+2. **Cron service** (new) — same repo, but:
+   - **Start command:** `node scripts/trigger-scheduled.mjs`
+     (it POSTs to the web endpoint with the secret, logs, and exits).
+   - **Cron schedule:** `*/5 * * * *` (every 5 min; 5 min is Railway's floor).
+   - **Env vars:** `APP_URL=https://<railway-domain>` and the same
+     `CRON_SECRET` as the web service. (It needs nothing else — no DB access;
+     all work happens behind the endpoint.)
+   - Keep it at **1 replica** (not that it matters here — it just triggers — but
+     good hygiene).
+
+The trigger script is dependency-free (`node scripts/trigger-scheduled.mjs`,
+global fetch), so the cron service builds/starts fast.
+
+**Token-expiry caveat:** LinkedIn tokens last ~60 days and can't be refreshed.
+The schedule UI blocks scheduling a post for after the user's token expires
+(prompting a reconnect). If a token still expires before the post fires, the
+cron marks it `failed` with a reconnect reason — content is kept so the user can
+reconnect and re-post.
+
 ### Things still to wire for a clean production deploy
 
 - [x] Add `prisma migrate deploy` to the deploy. Done via the `start` script
       (`prisma migrate deploy && next start`) so migrations apply on each boot,
       before the server accepts traffic.
+- [ ] Add the **cron service** (see above): second Railway service, start command
+      `node scripts/trigger-scheduled.mjs`, schedule `*/5 * * * *`, env `APP_URL`
+      + `CRON_SECRET`.
+- [ ] Set `CRON_SECRET` on the **web** service too (the endpoint checks it).
 - [ ] Rotate any API keys that were pasted in dev chat (OpenAI, Apify) before
       going beyond private testing.
 - [ ] Confirm `AUTH_TRUST_HOST=true` and a production `AUTH_SECRET` are set.

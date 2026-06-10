@@ -78,6 +78,17 @@ export async function getHistory(): Promise<SavedDraft[]> {
   return data.drafts ?? [];
 }
 
+/** Scheduled posts plus any that fired and failed (shown together). */
+export async function getScheduled(): Promise<SavedDraft[]> {
+  const [schedRes, failedRes] = await Promise.all([
+    fetch("/api/drafts?status=scheduled"),
+    fetch("/api/drafts?status=failed"),
+  ]);
+  const sched = schedRes.ok ? (await schedRes.json()).drafts ?? [] : [];
+  const failed = failedRes.ok ? (await failedRes.json()).drafts ?? [] : [];
+  return [...sched, ...failed];
+}
+
 export async function getDraft(id: string): Promise<SavedDraft | null> {
   const res = await fetch(`/api/drafts/${id}`);
   if (!res.ok) return null;
@@ -124,6 +135,27 @@ export async function updateDraftImage(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+}
+
+/** Schedule (or reschedule) a post for a UTC time (epoch ms). */
+export async function scheduleDraft(
+  id: string,
+  scheduledForMs: number,
+): Promise<void> {
+  await fetch(`/api/drafts/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "scheduled", scheduledFor: scheduledForMs }),
+  });
+}
+
+/** Cancel a scheduled post — returns it to a normal draft. */
+export async function cancelScheduledDraft(id: string): Promise<void> {
+  await fetch(`/api/drafts/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "drafting", scheduledFor: null }),
   });
 }
 

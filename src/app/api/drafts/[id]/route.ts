@@ -13,18 +13,24 @@ function toSavedDraft(d: {
   imageData: string | null;
   imageMime: string | null;
   imageAlt: string | null;
+  scheduledFor: Date | null;
+  linkedinUrl: string | null;
+  failedReason: string | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
   return {
     id: d.id,
     content: d.content,
-    status: d.status as "drafting" | "finished",
+    status: d.status as SavedDraft["status"],
     suggestion: d.suggestion as SavedDraft["suggestion"],
     inspirationPosts: d.inspirationPosts,
     imageData: d.imageData,
     imageMime: d.imageMime,
     imageAlt: d.imageAlt,
+    scheduledFor: d.scheduledFor ? d.scheduledFor.getTime() : null,
+    linkedinUrl: d.linkedinUrl,
+    failedReason: d.failedReason,
     createdAt: d.createdAt.getTime(),
     updatedAt: d.updatedAt.getTime(),
   };
@@ -32,11 +38,13 @@ function toSavedDraft(d: {
 
 const patchSchema = z.object({
   content: z.string().optional(),
-  status: z.enum(["drafting", "finished"]).optional(),
+  status: z.enum(["drafting", "scheduled", "finished", "failed"]).optional(),
   // Image attach/replace/remove. Send null to clear. All three move together.
   imageData: z.string().nullable().optional(),
   imageMime: z.string().nullable().optional(),
   imageAlt: z.string().nullable().optional(),
+  // Scheduling: epoch ms (UTC). Send null to clear when cancelling.
+  scheduledFor: z.number().nullable().optional(),
 });
 
 // GET /api/drafts/:id
@@ -90,9 +98,20 @@ export async function PATCH(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // scheduledFor arrives as epoch ms; Prisma wants a Date (or null to clear).
+  const { scheduledFor, ...rest } = parsed.data;
+  const data: Record<string, unknown> = { ...rest };
+  if (scheduledFor !== undefined) {
+    data.scheduledFor = scheduledFor === null ? null : new Date(scheduledFor);
+  }
+  // Leaving the scheduled state clears any stale failure reason.
+  if (rest.status && rest.status !== "failed") {
+    data.failedReason = null;
+  }
+
   const draft = await prisma.draft.update({
     where: { id },
-    data: parsed.data,
+    data,
   });
 
   return NextResponse.json({ draft: toSavedDraft(draft) });

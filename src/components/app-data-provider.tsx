@@ -13,6 +13,7 @@ import {
   saveProfile as apiSaveProfile,
   getDrafts as apiGetDrafts,
   getHistory as apiGetHistory,
+  getScheduled as apiGetScheduled,
 } from "@/lib/storage";
 import { EMPTY_PROFILE } from "@/lib/types";
 import type { UserProfile, SavedDraft } from "@/lib/types";
@@ -47,6 +48,12 @@ interface AppDataValue {
   historyLoading: boolean;
   ensureHistory: () => void; // lazy first-load trigger
   refreshHistory: () => Promise<void>;
+
+  // --- scheduled (status: scheduled) ---
+  scheduled: SavedDraft[] | null;
+  scheduledLoading: boolean;
+  ensureScheduled: () => void;
+  refreshScheduled: () => Promise<void>;
 }
 
 const AppDataContext = createContext<AppDataValue | null>(null);
@@ -58,11 +65,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [draftsLoading, setDraftsLoading] = useState(false);
   const [history, setHistory] = useState<SavedDraft[] | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [scheduled, setScheduled] = useState<SavedDraft[] | null>(null);
+  const [scheduledLoading, setScheduledLoading] = useState(false);
 
   // Guards so concurrent consumers don't each kick off a fetch.
   const profileFetched = useRef(false);
   const draftsFetched = useRef(false);
   const historyFetched = useRef(false);
+  const scheduledFetched = useRef(false);
 
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
@@ -88,6 +98,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setHistory(await apiGetHistory());
     } finally {
       setHistoryLoading(false);
+    }
+  }, []);
+
+  const loadScheduled = useCallback(async () => {
+    setScheduledLoading(true);
+    try {
+      setScheduled(await apiGetScheduled());
+    } finally {
+      setScheduledLoading(false);
     }
   }, []);
 
@@ -132,6 +151,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     return loadHistory();
   }, [loadHistory]);
 
+  const ensureScheduled = useCallback(() => {
+    if (!scheduledFetched.current) {
+      scheduledFetched.current = true;
+      void loadScheduled();
+    }
+  }, [loadScheduled]);
+
+  const refreshScheduled = useCallback(() => {
+    scheduledFetched.current = true;
+    return loadScheduled();
+  }, [loadScheduled]);
+
   const removeDraftFromCache = useCallback((id: string) => {
     setDrafts((prev) => (prev ? prev.filter((d) => d.id !== id) : prev));
   }, []);
@@ -150,6 +181,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     historyLoading,
     ensureHistory,
     refreshHistory,
+    scheduled,
+    scheduledLoading,
+    ensureScheduled,
+    refreshScheduled,
   };
 
   return (
@@ -202,6 +237,20 @@ export function useHistory() {
     history: ctx.history,
     loading: ctx.historyLoading || ctx.history === null,
     refresh: ctx.refreshHistory,
+  };
+}
+
+/** Scheduled slice. Lazily fetches on first use. */
+export function useScheduled() {
+  const ctx = useAppData();
+  const { ensureScheduled } = ctx;
+  useEffect(() => {
+    ensureScheduled();
+  }, [ensureScheduled]);
+  return {
+    scheduled: ctx.scheduled,
+    loading: ctx.scheduledLoading || ctx.scheduled === null,
+    refresh: ctx.refreshScheduled,
   };
 }
 
