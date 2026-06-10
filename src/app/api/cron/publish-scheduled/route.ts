@@ -31,7 +31,7 @@ function authorized(request: NextRequest): boolean {
   return header === secret;
 }
 
-export async function POST(request: NextRequest) {
+async function runCron(request: NextRequest) {
   if (!authorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -88,3 +88,9 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ ok: true, due: due.length, published, failed });
 }
+
+// POST is the canonical method. GET is also accepted (still CRON_SECRET-guarded)
+// so a stray http->https redirect — which downgrades POST to GET and would
+// otherwise 405 — still works.
+export const POST = runCron;
+export const GET = runCron;

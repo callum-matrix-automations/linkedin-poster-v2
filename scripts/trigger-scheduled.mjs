@@ -23,13 +23,31 @@ if (!appUrl || !secret) {
   process.exit(1);
 }
 
-const endpoint = `${appUrl.replace(/\/$/, "")}/api/cron/publish-scheduled`;
+// Normalize: ensure an https:// scheme so we never hit an http->https redirect
+// (a redirect downgrades POST to GET, which returns 405 from a POST-only route).
+let base = appUrl.replace(/\/$/, "");
+if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
+base = base.replace(/^http:\/\//i, "https://");
+
+const endpoint = `${base}/api/cron/publish-scheduled`;
 
 try {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "x-cron-secret": secret },
+    // Surface redirects loudly instead of silently following them as a GET.
+    redirect: "manual",
   });
+
+  if (res.status >= 300 && res.status < 400) {
+    const location = res.headers.get("location");
+    console.error(
+      `Cron trigger got a redirect (${res.status}) to ${location}. ` +
+        `Set APP_URL to the exact https URL to avoid this. Endpoint tried: ${endpoint}`,
+    );
+    process.exit(1);
+  }
+
   const text = await res.text();
   if (!res.ok) {
     console.error(`Cron trigger failed (${res.status}): ${text}`);
