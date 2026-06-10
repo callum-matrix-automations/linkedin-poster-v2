@@ -17,9 +17,14 @@ export const authConfig = {
       const isLoggedIn = !!auth?.user;
       const path = nextUrl.pathname;
 
-      // Public routes that never require auth.
+      // Public routes that never require a session. /api/auth/* is NextAuth's
+      // own routes; /api/cron/* is server-to-server and guards itself with
+      // CRON_SECRET (no user session exists for a cron call).
       const isAuthPage = path === "/login" || path === "/signup";
-      const isPublicApi = path === "/api/auth" || path.startsWith("/api/auth/");
+      const isPublicApi =
+        path === "/api/auth" ||
+        path.startsWith("/api/auth/") ||
+        path.startsWith("/api/cron/");
 
       if (isAuthPage) {
         // Logged-in users shouldn't sit on login/signup.
