@@ -67,6 +67,10 @@ export interface SavedDraft {
   content: string;
   status: "drafting" | "finished";
   inspirationPosts: LinkedInPost[];
+  // Optional generated image. imageData is base64 (no data: prefix).
+  imageData: string | null;
+  imageMime: string | null;
+  imageAlt: string | null;
   createdAt: number;
   updatedAt: number;
 }

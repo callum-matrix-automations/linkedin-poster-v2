@@ -10,6 +10,9 @@ function toSavedDraft(d: {
   status: string;
   suggestion: unknown;
   inspirationPosts: unknown;
+  imageData: string | null;
+  imageMime: string | null;
+  imageAlt: string | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -19,6 +22,9 @@ function toSavedDraft(d: {
     status: d.status as "drafting" | "finished",
     suggestion: d.suggestion as SavedDraft["suggestion"],
     inspirationPosts: d.inspirationPosts,
+    imageData: d.imageData,
+    imageMime: d.imageMime,
+    imageAlt: d.imageAlt,
     createdAt: d.createdAt.getTime(),
     updatedAt: d.updatedAt.getTime(),
   };
@@ -27,6 +33,10 @@ function toSavedDraft(d: {
 const patchSchema = z.object({
   content: z.string().optional(),
   status: z.enum(["drafting", "finished"]).optional(),
+  // Image attach/replace/remove. Send null to clear. All three move together.
+  imageData: z.string().nullable().optional(),
+  imageMime: z.string().nullable().optional(),
+  imageAlt: z.string().nullable().optional(),
 });
 
 // GET /api/drafts/:id

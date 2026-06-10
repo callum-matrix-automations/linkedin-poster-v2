@@ -112,6 +112,21 @@ export async function updateDraftContent(
   });
 }
 
+/** Attach/replace/remove a draft's image. Pass nulls to remove it. */
+export async function updateDraftImage(
+  id: string,
+  image: { imageData: string; imageMime: string; imageAlt: string } | null,
+): Promise<void> {
+  const body = image
+    ? { imageData: image.imageData, imageMime: image.imageMime, imageAlt: image.imageAlt }
+    : { imageData: null, imageMime: null, imageAlt: null };
+  await fetch(`/api/drafts/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export async function deleteDraft(id: string): Promise<void> {
   await fetch(`/api/drafts/${id}`, { method: "DELETE" });
 }

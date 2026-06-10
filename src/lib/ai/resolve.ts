@@ -88,3 +88,26 @@ export async function resolveProvider(userId: string): Promise<ResolvedProvider>
     model: settings[MODEL_FIELD[provider]],
   };
 }
+
+/**
+ * Resolves the user's GEMINI key specifically, regardless of which provider is
+ * active for text. Image generation is Gemini-only, so it needs a Gemini key
+ * even if the user generates text with OpenAI/Anthropic. Throws ResolveError
+ * (setup_required) with a Gemini-specific message when absent.
+ */
+export async function resolveGeminiKey(userId: string): Promise<string> {
+  const settings = await prisma.providerSettings.findUnique({ where: { userId } });
+  const encrypted = settings?.geminiKey;
+  if (!encrypted) {
+    throw new ResolveError(
+      "Image generation needs a Gemini key. Add one in Settings to create images.",
+    );
+  }
+  try {
+    return decryptSecret(encrypted);
+  } catch {
+    throw new ResolveError(
+      "Your stored Gemini key could not be read. Please re-enter it in Settings.",
+    );
+  }
+}

@@ -4,12 +4,15 @@ interface LinkedInPreviewProps {
   content: string;
   authorName: string;
   authorTitle: string;
+  /** Optional attached image (data URL) shown in the post card. */
+  imageUrl?: string | null;
 }
 
 export function LinkedInPreview({
   content,
   authorName,
   authorTitle,
+  imageUrl,
 }: LinkedInPreviewProps) {
   const charCount = content.length;
   const isOverLimit = charCount > 3000;
@@ -73,6 +76,16 @@ export function LinkedInPreview({
             </p>
           )}
         </div>
+
+        {/* Attached image (LinkedIn shows it full-width, edge to edge) */}
+        {imageUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imageUrl}
+            alt="Post attachment preview"
+            className="w-full border-y border-[#e0e0e0] object-cover"
+          />
+        )}
 
         {content && (
           <>

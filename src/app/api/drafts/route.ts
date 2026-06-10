@@ -10,6 +10,9 @@ function toSavedDraft(d: {
   status: string;
   suggestion: unknown;
   inspirationPosts: unknown;
+  imageData: string | null;
+  imageMime: string | null;
+  imageAlt: string | null;
   createdAt: Date;
   updatedAt: Date;
 }): SavedDraft {
@@ -19,6 +22,9 @@ function toSavedDraft(d: {
     status: d.status as "drafting" | "finished",
     suggestion: d.suggestion as SavedDraft["suggestion"],
     inspirationPosts: d.inspirationPosts as SavedDraft["inspirationPosts"],
+    imageData: d.imageData,
+    imageMime: d.imageMime,
+    imageAlt: d.imageAlt,
     createdAt: d.createdAt.getTime(),
     updatedAt: d.updatedAt.getTime(),
   };

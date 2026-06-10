@@ -5,9 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   getDraft,
   updateDraftContent,
+  updateDraftImage,
   finishDraft,
   deleteDraft,
 } from "@/lib/storage";
+import { ImageComposer, type DraftImage } from "@/components/image-composer";
+import { toDataUrl } from "@/lib/image-client";
 import {
   useProfile,
   useDrafts,
@@ -67,6 +70,9 @@ function WriteEditor({ draftId }: { draftId: string }) {
   const [hashtagLoading, setHashtagLoading] = useState(false);
   const [hashtagError, setHashtagError] = useState<string | null>(null);
   const [hashtagSetupNeeded, setHashtagSetupNeeded] = useState(false);
+  // Image creator: the draft's attached image + whether the panel is open.
+  const [image, setImage] = useState<DraftImage | null>(null);
+  const [showImagePanel, setShowImagePanel] = useState(false);
   // Author identity comes from the cached profile; falls back to empty until loaded.
   const authorName = profile?.name ?? "";
   const authorTitle = profile?.title ?? "";
@@ -90,6 +96,15 @@ function WriteEditor({ draftId }: { draftId: string }) {
       setFinished(isFinished);
       // Finished posts open locked (read-only) until the user clicks Edit.
       setLocked(isFinished);
+      // Load any saved image; open the panel if one exists.
+      if (draft.imageData && draft.imageMime) {
+        setImage({
+          imageData: draft.imageData,
+          imageMime: draft.imageMime,
+          imageAlt: draft.imageAlt ?? "",
+        });
+        setShowImagePanel(true);
+      }
       setMounted(true);
 
       if (draft.content) {
@@ -252,6 +267,13 @@ function WriteEditor({ draftId }: { draftId: string }) {
     } finally {
       setHashtagLoading(false);
     }
+  }
+
+  // Image add/replace/remove/alt-edit. Persists immediately (a deliberate
+  // action, not keystroke autosave) and mirrors into the LinkedIn preview.
+  function handleImageChange(next: DraftImage | null) {
+    setImage(next);
+    void updateDraftImage(draftId, next);
   }
 
   function handlePostToLinkedIn() {
@@ -438,6 +460,16 @@ function WriteEditor({ draftId }: { draftId: string }) {
           text={content}
           authorName={authorName}
           authorTitle={authorTitle}
+          image={
+            image
+              ? {
+                  base64: image.imageData,
+                  mimeType: image.imageMime,
+                  altText: image.imageAlt,
+                }
+              : null
+          }
+          imageUrl={image ? toDataUrl(image.imageData, image.imageMime) : null}
           onClose={() => setShowPublish(false)}
         />
       )}
@@ -515,7 +547,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
               )}
 
               {!loading && !error && (
-                <>
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                   {locked && (
                     <div className="flex items-center gap-2 border-b border-chrome-border bg-chrome-light px-4 py-2 text-xs text-chrome-text">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -551,13 +583,43 @@ function WriteEditor({ draftId }: { draftId: string }) {
                       </button>
                     </div>
                   )}
-                  <PostEditor
-                    value={content}
-                    onChange={handleDraftChange}
-                    placeholder="Start writing your post..."
-                    readOnly={locked}
-                  />
-                </>
+                  <div className="flex min-h-80 flex-1 flex-col">
+                    <PostEditor
+                      value={content}
+                      onChange={handleDraftChange}
+                      placeholder="Start writing your post..."
+                      readOnly={locked}
+                    />
+                  </div>
+
+                  {/* Image creator — editable only when not locked. */}
+                  {!locked && (
+                    showImagePanel || image ? (
+                      <ImageComposer
+                        postContent={content}
+                        image={image}
+                        onChange={handleImageChange}
+                      />
+                    ) : (
+                      <div className="border-t border-chrome-border p-4">
+                        <button
+                          type="button"
+                          onClick={() => setShowImagePanel(true)}
+                          disabled={!content}
+                          className="flex items-center gap-2 rounded-lg border border-chrome-border px-3.5 py-2 text-sm font-medium text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong disabled:opacity-40"
+                          style={{ transitionDuration: "var(--duration-fast)" }}
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <path d="M21 15l-5-5L5 21" />
+                          </svg>
+                          Add an image
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
               )}
             </>
           ) : (
@@ -591,6 +653,7 @@ function WriteEditor({ draftId }: { draftId: string }) {
               content={content}
               authorName={authorName}
               authorTitle={authorTitle}
+              imageUrl={image ? toDataUrl(image.imageData, image.imageMime) : null}
             />
           </div>
         </div>

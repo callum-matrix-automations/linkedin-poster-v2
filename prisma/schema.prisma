@@ -120,6 +120,12 @@ model Draft {
   // The LinkedInPost[] used as inspiration for this draft.
   inspirationPosts Json @map("inspiration_posts")
 
+  // Optional generated image attached to the post. imageData is a base64 PNG
+  // (no data: prefix); imageMime is its mime type; imageAlt is LinkedIn alt text.
+  imageData String? @map("image_data")
+  imageMime String? @map("image_mime")
+  imageAlt  String? @map("image_alt")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

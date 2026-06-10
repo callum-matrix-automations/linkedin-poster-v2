@@ -34,11 +34,20 @@ export interface PublishResult {
   code?: string;
 }
 
-export async function publishToLinkedIn(text: string): Promise<PublishResult> {
+export interface PublishImage {
+  base64: string;
+  mimeType: string;
+  altText?: string;
+}
+
+export async function publishToLinkedIn(
+  text: string,
+  image?: PublishImage | null,
+): Promise<PublishResult> {
   const res = await fetch("/api/linkedin/publish", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, image: image ?? null }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

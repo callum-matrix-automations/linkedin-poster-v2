@@ -144,12 +144,31 @@ The intended direction for the product. Numbered as provided.
   user's machine, not a shared server. The "Claude" provider option could point
   at `http://localhost:<port>` for the local Claude Code proxy.
 
-### 3. Image creator (BYOK)
+### 3. Image creator (BYOK) — DONE (Gemini)
 
-- Generate images for posts, again via a **BYOK system** (user's own key for the
-  image provider — e.g. OpenAI images, or another provider per the BYOK model).
-- New AI route + a provider adapter for image generation. Needs UI in the editor
-  to request, preview, regenerate, and attach an image to the post/preview.
+- Generate images for posts using the user's **Gemini** key (reuses BYOK; no
+  separate image key). Implemented with `gemini-3.1-flash-image` ("Nano Banana")
+  via `:generateContent` on the **v1beta** path (v1 rejects responseModalities/
+  imageConfig — verified live). `src/lib/ai/image.ts` + `/api/ai/generate-image`
+  (resolves the Gemini key specifically via `resolveGeminiKey`, independent of
+  the active text provider).
+- Editor: inline `ImageComposer` panel — on open it auto-suggests a prompt from
+  the post (`/api/ai/suggest-image-prompt`, uses the active text provider),
+  editable; aspect ratio; generate/regenerate/remove; alt text. The image is
+  held as a **data URL** (no object storage) and **persisted on the draft**
+  (`image_data`/`image_mime`/`image_alt` columns) and mirrored into the LinkedIn
+  preview card.
+- LinkedIn attach (auto): the publish flow does the 3-call Images API flow —
+  `initializeUpload` → PUT raw bytes (Authorization required for images) →
+  create post with `content.media`. Sufficient with `w_member_social`.
+- **Caveats noted for future work:**
+  - Every Gemini image carries an invisible **SynthID watermark** (unavoidable).
+  - LinkedIn processes the uploaded image **asynchronously** and the readiness
+    GET (`/rest/images/{urn}`) is **blocked for `w_member_social`-only tokens**,
+    so we can't poll. The publish route uses a short delay + one retry to dodge
+    the "image not AVAILABLE yet" race; may need tuning under load.
+  - Images are stored base64 on the post row (can be ~1-2MB). Fine for now; if
+    this grows, move to object storage.
 
 ### 4. Hashtag generation as a separate agent
 
@@ -188,6 +207,42 @@ The intended direction for the product. Numbered as provided.
   server to fire scheduled posts, OR the local app must be running at the
   scheduled time.
 
+### 8. Smarter post ideas — learn from the team's own LinkedIn results
+
+- Personalize idea generation using **how the user's own published posts
+  actually performed** (likes/comments over time), rather than only strangers'
+  posts. E.g. "your hiring posts outperform your product posts 3:1 — here are
+  more hiring angles."
+- Mechanism: after a user connects LinkedIn (#6), periodically read back their
+  own posts + engagement, store a per-user performance history, and feed the
+  patterns into the `generate-suggestions` prompt (weight ideas toward what
+  has worked for *this* author and audience).
+- **Gating risk (important):** reading a member's own posts/analytics needs the
+  **`r_member_social`** scope, which is **approval-gated** by LinkedIn (NOT
+  self-serve like `w_member_social` posting). LinkedIn approval could be slow or
+  denied — this is the main blocker, and the feature can't ship without it.
+- Storage: a per-user table of post performance snapshots (post URN, engagement
+  counts, captured-at). Depends on auth + DB (already built).
+- Lower-effort precursor (no approval needed): tighten the *current*
+  `generate-suggestions` prompt to explicitly analyze the engagement numbers it
+  already receives — identify what made the top inspiration posts work (hook
+  style, format, length, angle) and apply those patterns. Uses data we already
+  fetch; a contained prompt change. Good interim step toward #8.
+
+### 9. Trend feed / topic radar
+
+- A standing, always-on **"what's hot this week in your space"** view: on a
+  schedule, pull top-performing posts for the user's industry/topics, store them
+  over time, and surface them as ready-made inspiration — independent of the
+  user running a manual Find search.
+- Mechanism: a scheduled job (same scheduler infra as #7) runs saved searches
+  via Apify, dedupes/stores results, and a new UI surfaces the trending set,
+  which can seed idea generation directly.
+- **Cost note:** more Apify usage (scheduled, recurring) — has an ongoing API
+  cost that scales with how many topics/users we track. Needs storage of trend
+  data over time and new UI. The most infrastructure-heavy of the idea features.
+- Depends on: backend scheduler (shared with #7), DB storage, Apify budget.
+
 ---
 
 ## Part 4: Cross-Cutting Dependencies
@@ -206,6 +261,12 @@ Quick map of what each expansion feature depends on, so build order is clear.
   bot linkage.
 - **#7 Scheduling** — needs **#6 working** + an **always-on backend scheduler**.
   The only feature that breaks the "local-only" model.
+- **#8 Smarter ideas (own results)** — needs **#6 working** + LinkedIn's
+  **approval-gated `r_member_social`** scope + per-user performance storage
+  (auth + DB, already built). The low-effort prompt-only precursor needs none of
+  this.
+- **#9 Trend feed** — needs the **#7 scheduler** + DB storage + ongoing Apify
+  budget. Server-side only (recurring jobs), so it also breaks "local-only."
 
 **Tension to resolve:** #2 (local desktop app) and #7 (server-side scheduling)
 pull in opposite directions — one wants everything on the user's machine, the

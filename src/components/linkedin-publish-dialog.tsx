@@ -5,24 +5,31 @@ import { useRouter } from "next/navigation";
 import {
   publishToLinkedIn,
   LINKEDIN_MAX_CHARS,
+  type PublishImage,
 } from "@/lib/linkedin-client";
 import { LinkedInPreview } from "@/components/linkedin-preview";
 
 /**
  * Confirm-before-publish dialog for posting a draft to LinkedIn. Renders the
- * post in the real LinkedIn preview card (same as the editor) so the user sees
- * exactly what it will look like, plus the PUBLIC visibility. Handles success
- * (links to the live post) and the reconnect-required case.
+ * post (and its attached image, if any) in the real LinkedIn preview card so
+ * the user sees exactly what it will look like, plus the PUBLIC visibility.
+ * Handles success (links to the live post) and the reconnect-required case.
  */
 export function LinkedInPublishDialog({
   text,
   authorName,
   authorTitle,
+  image,
+  imageUrl,
   onClose,
 }: {
   text: string;
   authorName: string;
   authorTitle: string;
+  /** Image bytes to publish (base64 + mime + alt). */
+  image?: PublishImage | null;
+  /** Data URL for previewing the image in the card. */
+  imageUrl?: string | null;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -39,7 +46,7 @@ export function LinkedInPublishDialog({
     if (publishing || overLimit) return;
     setPublishing(true);
     setResult(null);
-    const r = await publishToLinkedIn(text);
+    const r = await publishToLinkedIn(text, image);
     setPublishing(false);
     if (r.ok) {
       setResult({ kind: "success", url: r.postUrl });
@@ -125,6 +132,7 @@ export function LinkedInPublishDialog({
                 content={text}
                 authorName={authorName}
                 authorTitle={authorTitle}
+                imageUrl={imageUrl}
               />
 
               {overLimit && (
