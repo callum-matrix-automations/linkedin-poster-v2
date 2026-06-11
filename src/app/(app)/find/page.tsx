@@ -8,6 +8,7 @@ import { clearCurrentDraft } from "@/lib/draft-store";
 import { PostCard } from "@/components/post-card";
 import { SuggestionCard } from "@/components/suggestion-card";
 import { ProviderSetupPrompt } from "@/components/provider-setup-prompt";
+import { aiJsonRequest } from "@/lib/local-proxy-client";
 import { EMPTY_PROFILE } from "@/lib/types";
 import type { LinkedInPost, PostSuggestion } from "@/lib/types";
 
@@ -235,19 +236,15 @@ export default function FindPage() {
     setSuggestionsLoading(true); setSuggestionsError(null); setSuggestionsSetupNeeded(false); setSuggestions([]);
     try {
       const postsForAI = selectedPosts.length > 0 ? selectedPosts : filteredPosts.slice(0, 6);
-      const res = await fetch("/api/ai/generate-suggestions", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: profile ?? EMPTY_PROFILE, posts: postsForAI, count: 6 }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (data.code === "setup_required") setSuggestionsSetupNeeded(true);
-        throw new Error(data.error || `Request failed (${res.status})`);
-      }
-      const data = await res.json();
+      const data = await aiJsonRequest<{ suggestions?: PostSuggestion[] }>(
+        "/api/ai/generate-suggestions",
+        { profile: profile ?? EMPTY_PROFILE, posts: postsForAI, count: 6 },
+      );
       setSuggestions(data.suggestions || []);
     } catch (err) {
-      setSuggestionsError(err instanceof Error ? err.message : "Failed to generate suggestions");
+      const e = err as Error & { code?: string };
+      if (e.code === "setup_required") setSuggestionsSetupNeeded(true);
+      setSuggestionsError(e.message || "Failed to generate suggestions");
     } finally { setSuggestionsLoading(false); }
   }
 

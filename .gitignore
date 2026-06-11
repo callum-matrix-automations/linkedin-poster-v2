@@ -45,3 +45,10 @@ next-env.d.ts
 
 # prisma generated client
 /src/generated
+
+# electron desktop build (its own node_modules + build output)
+/electron/node_modules
+/electron/release
+
+# proxy runtime token store (never commit)
+/proxy/tokens.json

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile } from "@/lib/types";
-import { chatCompletion } from "@/lib/ai/providers";
-import { resolveProvider, ResolveError } from "@/lib/ai/resolve";
+import { ResolveError } from "@/lib/ai/resolve";
+import { runChat } from "@/lib/ai/run";
 import { getUserId } from "@/lib/session";
 
 /**
@@ -41,9 +41,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { content, profile } = (await request.json()) as {
+    const { content, profile, proxyText } = (await request.json()) as {
       content: string;
       profile: UserProfile;
+      proxyText?: string;
     };
 
     if (!content || !content.trim()) {
@@ -52,8 +53,6 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-
-    const { provider, apiKey, model } = await resolveProvider(userId);
 
     const userMessage = [
       "Author profile:",
@@ -67,16 +66,19 @@ export async function POST(request: NextRequest) {
       "Generate 3-5 hashtags. Respond with ONLY a raw JSON array of strings, no leading # and no markdown.",
     ].join("\n");
 
-    const text = await chatCompletion({
-      provider,
-      apiKey,
-      model,
-      messages: [
+    const result = await runChat(
+      userId,
+      [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      maxTokens: 512,
-    });
+      512,
+      proxyText,
+    );
+    if (result.deferred) {
+      return NextResponse.json(result.payload);
+    }
+    const text = result.text;
 
     let parsed: unknown;
     try {

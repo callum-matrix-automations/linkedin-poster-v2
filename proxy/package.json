@@ -1,0 +1,11 @@
+{
+  "name": "claude-code-proxy",
+  "version": "1.0.0",
+  "description": "Claude API proxy with standalone OAuth authentication. Ported from overcast-website-proving-ground.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}

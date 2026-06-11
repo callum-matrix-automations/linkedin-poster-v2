@@ -1,0 +1,64 @@
+name: Desktop release
+
+# Build the Windows .exe and Mac .dmg installers and attach them to a GitHub
+# Release. Triggers when you push a tag like `v1.0.0`, or manually from the
+# Actions tab.
+#
+# Builds are UNSIGNED (no Apple/Windows certificate). Mac users open with a
+# one-time right-click -> Open; Windows users click "More info -> Run anyway".
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # needed to create/update the Release and upload assets
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: dist:win
+            artifact: Elevateo-Posts-Setup.exe
+          - os: macos-latest
+            target: dist:mac
+            artifact: Elevateo-Posts.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install desktop deps
+        working-directory: electron
+        run: npm install
+
+      - name: Build installer
+        working-directory: electron
+        # CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from trying
+        # to find a macOS signing identity (we build unsigned on purpose).
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run ${{ matrix.target }}
+
+      - name: Upload to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: electron/release/${{ matrix.artifact }}
+          # On a tag push the release is named after the tag. On a manual run
+          # (no tag), fall back to a fixed "desktop-latest" release.
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'desktop-latest' }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || 'Desktop (latest)' }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

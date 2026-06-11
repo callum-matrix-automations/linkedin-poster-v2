@@ -32,6 +32,34 @@ export interface ResolvedProvider {
   model: string;
 }
 
+/**
+ * The resolved AI target. Either a normal cloud provider (server calls it with
+ * the user's key) or the local Claude proxy (the server can't reach localhost,
+ * so it defers: the route returns the built messages and the desktop client
+ * calls the proxy itself).
+ */
+export type AiTarget =
+  | { kind: "cloud"; provider: ProviderId; apiKey: string; model: string }
+  | { kind: "local-proxy" };
+
+/**
+ * Resolve which AI target to use. Like resolveProvider, but also handles the
+ * "local-claude" selection (returns a local-proxy marker, no key needed).
+ */
+export async function resolveAiTarget(userId: string): Promise<AiTarget> {
+  const settings = await prisma.providerSettings.findUnique({ where: { userId } });
+  if (!settings || !settings.activeProvider) {
+    throw new ResolveError(
+      "No AI provider is set up. Choose one in Settings to generate posts.",
+    );
+  }
+  if (settings.activeProvider === "local-claude") {
+    return { kind: "local-proxy" };
+  }
+  const r = await resolveProvider(userId);
+  return { kind: "cloud", ...r };
+}
+
 const KEY_FIELD: Record<ProviderId, "openaiKey" | "anthropicKey" | "geminiKey"> = {
   openai: "openaiKey",
   anthropic: "anthropicKey",

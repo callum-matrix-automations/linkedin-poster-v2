@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile, LinkedInPost, PostSuggestion } from "@/lib/types";
-import { chatCompletion } from "@/lib/ai/providers";
-import { resolveProvider, ResolveError } from "@/lib/ai/resolve";
+import { ResolveError } from "@/lib/ai/resolve";
+import { runChat } from "@/lib/ai/run";
 import { getUserId } from "@/lib/session";
 
 const SYSTEM_PROMPT = `You are a LinkedIn post strategist. Your job is to analyze high-performing LinkedIn posts and a user's profile to suggest post ideas that will resonate with their audience.
@@ -89,10 +89,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { profile, posts, count = 6 } = (await request.json()) as {
+    const { profile, posts, count = 6, proxyText } = (await request.json()) as {
       profile: UserProfile;
       posts: LinkedInPost[];
       count?: number;
+      proxyText?: string;
     };
 
     if (!profile || !posts?.length) {
@@ -101,8 +102,6 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-
-    const { provider, apiKey, model } = await resolveProvider(userId);
 
     const userMessage = [
       "Here is the user's profile:",
@@ -116,16 +115,20 @@ export async function POST(request: NextRequest) {
       `Generate ${count} post suggestions for this person. Remember: respond with ONLY a raw JSON array, no markdown fences.`,
     ].join("\n");
 
-    const text = await chatCompletion({
-      provider,
-      apiKey,
-      model,
-      messages: [
+    const result = await runChat(
+      userId,
+      [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      maxTokens: 4096,
-    });
+      4096,
+      proxyText,
+    );
+    // Local Claude: defer; the client resubmits proxyText for parsing below.
+    if (result.deferred) {
+      return NextResponse.json(result.payload);
+    }
+    const text = result.text;
 
     let suggestions: PostSuggestion[];
     try {

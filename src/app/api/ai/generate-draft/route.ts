@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UserProfile, LinkedInPost, PostSuggestion } from "@/lib/types";
-import { chatCompletion } from "@/lib/ai/providers";
-import { resolveProvider, ResolveError } from "@/lib/ai/resolve";
+import { ResolveError } from "@/lib/ai/resolve";
+import { runChat } from "@/lib/ai/run";
 import { getUserId } from "@/lib/session";
 
 const SYSTEM_PROMPT = `You are a LinkedIn ghostwriter. You write posts that sound like they were written by the person, not by AI. Your job is to take a post idea and turn it into a compelling LinkedIn post.
@@ -79,10 +79,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { profile, suggestion, posts } = (await request.json()) as {
+    const { profile, suggestion, posts, proxyText } = (await request.json()) as {
       profile: UserProfile;
       suggestion: PostSuggestion;
       posts: LinkedInPost[];
+      proxyText?: string;
     };
 
     if (!profile || !suggestion) {
@@ -91,10 +92,6 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-
-    // Resolve the user's BYOK provider server-side. The key never came from
-    // the client and is decrypted here just-in-time.
-    const { provider, apiKey, model } = await resolveProvider(userId);
 
     const userMessage = [
       "Here is the user's profile:",
@@ -115,18 +112,22 @@ export async function POST(request: NextRequest) {
       "Write the post now. Raw text only, no commentary.",
     ].join("\n");
 
-    const draft = await chatCompletion({
-      provider,
-      apiKey,
-      model,
-      messages: [
+    // Either calls the cloud provider here, or (for local Claude) returns a
+    // deferral payload the desktop client runs against its local proxy.
+    const result = await runChat(
+      userId,
+      [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      maxTokens: 4096,
-    });
+      4096,
+      proxyText,
+    );
+    if (result.deferred) {
+      return NextResponse.json(result.payload);
+    }
 
-    return NextResponse.json({ draft });
+    return NextResponse.json({ draft: result.text });
   } catch (err) {
     if (err instanceof ResolveError) {
       return NextResponse.json(

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { chatCompletion } from "@/lib/ai/providers";
-import { resolveProvider, ResolveError } from "@/lib/ai/resolve";
+import { ResolveError } from "@/lib/ai/resolve";
+import { runChatResponse } from "@/lib/ai/run";
 import { getUserId } from "@/lib/session";
 
 /**
@@ -28,7 +28,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { content } = (await request.json()) as { content: string };
+    const { content, proxyText } = (await request.json()) as {
+      content: string;
+      proxyText?: string;
+    };
     if (!content || !content.trim()) {
       return NextResponse.json(
         { error: "Post content is required" },
@@ -36,23 +39,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { provider, apiKey, model } = await resolveProvider(userId);
-
-    const prompt = await chatCompletion({
-      provider,
-      apiKey,
-      model,
-      messages: [
+    // Returns the prompt text, or a local-proxy deferral payload for desktop.
+    return await runChatResponse(
+      userId,
+      [
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
           content: `Post:\n---\n${content.slice(0, 3000)}\n---\n\nWrite one image prompt. Prompt text only.`,
         },
       ],
-      maxTokens: 256,
-    });
-
-    return NextResponse.json({ prompt: prompt.trim() });
+      256,
+      "prompt",
+      proxyText,
+    );
   } catch (err) {
     if (err instanceof ResolveError) {
       return NextResponse.json(

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import type { UserProfile } from "@/lib/types";
 import { chatCompletionStream } from "@/lib/ai/providers";
-import { resolveProvider, ResolveError } from "@/lib/ai/resolve";
+import { resolveAiTarget, ResolveError } from "@/lib/ai/resolve";
 import { getUserId } from "@/lib/session";
 
 const SYSTEM_PROMPT = `You are an inline text editor for LinkedIn posts. You receive a selected portion of text from a LinkedIn post and an editing instruction. Your job is to transform ONLY the selected text according to the instruction while maintaining consistency with the full post's voice and tone.
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { provider, apiKey, model } = await resolveProvider(userId);
+    const target = await resolveAiTarget(userId);
 
     const instruction =
       action === "custom" && customPrompt
@@ -90,17 +90,25 @@ export async function POST(request: NextRequest) {
       "Return ONLY the replacement text.",
     ].join("\n");
 
+    const messages = [
+      { role: "system" as const, content: SYSTEM_PROMPT },
+      { role: "user" as const, content: userMessage },
+    ];
+
+    // Local Claude (desktop): the server can't reach the localhost proxy, so
+    // return a JSON deferral payload and let the client stream from the proxy.
+    if (target.kind === "local-proxy") {
+      return Response.json({ localProxy: true, messages, maxTokens: 2048 });
+    }
+
     // The provider abstraction returns a normalized SSE stream
     // (`data: {"text":"..."}` then `data: [DONE]`), so the client parser is
     // provider-agnostic.
     const readable = await chatCompletionStream({
-      provider,
-      apiKey,
-      model,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
+      provider: target.provider,
+      apiKey: target.apiKey,
+      model: target.model,
+      messages,
       maxTokens: 2048,
     });
 

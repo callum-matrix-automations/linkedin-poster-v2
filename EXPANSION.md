@@ -130,19 +130,30 @@ The intended direction for the product. Numbered as provided.
 - Keys are per-user secrets — needs secure storage (encrypted at rest if there's
   a backend; or kept local if the app is local-only, see #2).
 
-### 2. Downloadable local desktop application
+### 2. Downloadable local desktop application — DONE (Electron, unsigned)
 
-- Package the app so a user can **download, hit execute, and run it on their
-  local PC** (e.g. an Electron/Tauri wrapper around the Next.js app, or a packaged
-  Node server).
-- Running locally enables **proxy use with a local Claude Code repo** the user
-  has set up that exposes Claude Code as a local API. (This is the same
-  local-proxy approach that worked in dev but failed on Railway — running on the
-  user's own machine sidesteps the cloud-auth problem entirely, since the user is
-  authenticated locally.)
-- Implication: BYOK (#1) + local execution means keys/credentials can live on the
-  user's machine, not a shared server. The "Claude" provider option could point
-  at `http://localhost:<port>` for the local Claude Code proxy.
+- Thin Electron shell in `electron/` (its own mini-project, so the Railway web
+  deploy never installs Electron). It loads the live Railway URL in a window
+  AND spawns the bundled Claude proxy on `localhost:42069`. The window is the
+  one place a hosted page can reach localhost (a normal browser can't — mixed
+  content / CORS), which is the whole reason the desktop app exists.
+- The proxy (`proxy/`, brought over from landing-page-builder) is an
+  OpenAI-compatible Claude proxy with its own OAuth — users sign into their
+  Claude account in Settings (no API key, uses their Claude subscription).
+  Bundled and run via the Electron binary as Node, so users need no Node.js.
+- `local-claude` provider wiring: the server can't reach the user's localhost,
+  so the `/api/ai/*` routes DEFER for local-claude — they build the prompt and
+  return `{ localProxy, messages, maxTokens }`; the desktop client runs it
+  against the proxy and (for JSON routes) resubmits the text so the route's own
+  parsing runs. Zero logic duplication. Covers draft, suggestions, hashtags,
+  image-prompt, and streaming inline-edit.
+- Desktop detection: `window.elevateoDesktop` (preload) + `Elevateo-Desktop`
+  user-agent tag (`src/lib/desktop.ts`). In a browser, Settings shows
+  "Download the desktop app"; in the shell, the sign-in flow.
+- Builds are **unsigned** (one-time OS prompt). Windows `.exe` builds anywhere;
+  Mac `.dmg` must build on a Mac. Distributed via GitHub Releases; the Settings
+  download links point at the latest release assets (override via
+  `NEXT_PUBLIC_DESKTOP_DOWNLOAD_{WIN,MAC}`). See `DESKTOP.md`.
 
 ### 3. Image creator (BYOK) — DONE (Gemini)
 

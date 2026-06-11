@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { getProfile } from "@/lib/storage";
+import { isLocalProxyPayload, localProxyStream } from "@/lib/local-proxy-client";
 
 type Action = "rewrite" | "shorten" | "expand" | "bolder" | "softer" | "custom";
 
@@ -63,6 +64,22 @@ export function InlineEditToolbar({
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `Request failed (${res.status})`);
+      }
+
+      // Local Claude (desktop): the route returns a JSON deferral payload
+      // instead of an SSE stream. Stream from the local proxy directly.
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        if (isLocalProxyPayload(data)) {
+          for await (const chunk of localProxyStream(data)) {
+            onStreamChunk(chunk);
+          }
+          onStreamDone();
+          onClose();
+          return;
+        }
+        throw new Error(data.error || "Unexpected response");
       }
 
       const reader = res.body?.getReader();

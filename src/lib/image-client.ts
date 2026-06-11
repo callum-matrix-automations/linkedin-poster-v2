@@ -4,6 +4,8 @@
  * a data URL and persists it on the draft.
  */
 
+import { aiJsonRequest } from "@/lib/local-proxy-client";
+
 export type AspectRatio = "1:1" | "16:9" | "4:3" | "9:16";
 
 export interface GeneratedImage {
@@ -21,14 +23,16 @@ interface Result<T> {
 
 /** Suggest an image prompt from the post content (uses the active text provider). */
 export async function suggestImagePrompt(content: string): Promise<Result<string>> {
-  const res = await fetch("/api/ai/suggest-image-prompt", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) return { ok: false, error: data.error, code: data.code };
-  return { ok: true, data: data.prompt };
+  try {
+    const data = await aiJsonRequest<{ prompt?: string }>(
+      "/api/ai/suggest-image-prompt",
+      { content },
+    );
+    return { ok: true, data: data.prompt };
+  } catch (err) {
+    const e = err as Error & { code?: string };
+    return { ok: false, error: e.message, code: e.code };
+  }
 }
 
 /** Generate an image via Gemini (needs a Gemini key). */

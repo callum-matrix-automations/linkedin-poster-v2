@@ -13,6 +13,7 @@ import {
 } from "@/lib/storage";
 import { ScheduleDialog } from "@/components/schedule-dialog";
 import { formatInZone } from "@/lib/timezone";
+import { aiJsonRequest } from "@/lib/local-proxy-client";
 import { ImageComposer, type DraftImage } from "@/components/image-composer";
 import { toDataUrl } from "@/lib/image-client";
 import {
@@ -160,24 +161,17 @@ function WriteEditor({ draftId }: { draftId: string }) {
     setSetupNeeded(false);
 
     try {
-      const res = await fetch("/api/ai/generate-draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile, suggestion: sugg, posts }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (data.code === "setup_required") setSetupNeeded(true);
-        throw new Error(data.error || `Request failed (${res.status})`);
-      }
-
-      const data = await res.json();
+      const data = await aiJsonRequest<{ draft?: string }>(
+        "/api/ai/generate-draft",
+        { profile, suggestion: sugg, posts },
+      );
       const text = data.draft || "";
       setContent(text);
       void updateDraftContent(draftId, text);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate draft");
+      const e = err as Error & { code?: string };
+      if (e.code === "setup_required") setSetupNeeded(true);
+      setError(e.message || "Failed to generate draft");
     } finally {
       setLoading(false);
     }
@@ -251,17 +245,10 @@ function WriteEditor({ draftId }: { draftId: string }) {
     setHashtagError(null);
     setHashtagSetupNeeded(false);
     try {
-      const res = await fetch("/api/ai/generate-hashtags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, profile: profile ?? EMPTY_PROFILE }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (data.code === "setup_required") setHashtagSetupNeeded(true);
-        throw new Error(data.error || `Request failed (${res.status})`);
-      }
-      const data = await res.json();
+      const data = await aiJsonRequest<{ hashtags?: string[] }>(
+        "/api/ai/generate-hashtags",
+        { content, profile: profile ?? EMPTY_PROFILE },
+      );
       const tags: string[] = data.hashtags || [];
       if (tags.length === 0) return;
 
@@ -271,9 +258,9 @@ function WriteEditor({ draftId }: { draftId: string }) {
       const next = `${base}\n\n${tagLine}`;
       handleDraftChange(next);
     } catch (err) {
-      setHashtagError(
-        err instanceof Error ? err.message : "Failed to generate hashtags",
-      );
+      const e = err as Error & { code?: string };
+      if (e.code === "setup_required") setHashtagSetupNeeded(true);
+      setHashtagError(e.message || "Failed to generate hashtags");
     } finally {
       setHashtagLoading(false);
     }

@@ -64,7 +64,10 @@ export async function GET() {
 }
 
 const putSchema = z.object({
-  activeProvider: z.enum(["openai", "anthropic", "gemini", ""]).optional(),
+  // local-claude is the desktop-only local proxy provider (no key stored).
+  activeProvider: z
+    .enum(["openai", "anthropic", "gemini", "local-claude", ""])
+    .optional(),
   // A key string is encrypted & stored; "" clears it; undefined leaves it.
   keys: z
     .object({

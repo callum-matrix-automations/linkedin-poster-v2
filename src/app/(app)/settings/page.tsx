@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PROVIDERS, type ProviderId } from "@/lib/providers";
 import {
   getProviderSettings,
@@ -17,12 +17,32 @@ import {
   startLinkedInConnect,
   type LinkedInStatus,
 } from "@/lib/linkedin-client";
+import { isDesktopApp } from "@/lib/desktop";
+import {
+  getProxyAuthStatus,
+  openProxyLogin,
+  proxyLogout,
+  type ProxyAuthStatus,
+} from "@/lib/local-claude-auth";
 
 type TestState =
   | { status: "idle" }
   | { status: "testing" }
   | { status: "ok"; model?: string }
   | { status: "error"; message: string };
+
+// Desktop app download links. Default to the GitHub Releases "latest" assets;
+// override per-platform via NEXT_PUBLIC_DESKTOP_DOWNLOAD_{WIN,MAC} if the asset
+// names change. (Update the repo path if the GitHub repo moves.)
+const RELEASES = "https://github.com/callum-matrix-automations/linkedin-poster-v2/releases/latest/download";
+const DESKTOP_DOWNLOAD = {
+  windows:
+    process.env.NEXT_PUBLIC_DESKTOP_DOWNLOAD_WIN ||
+    `${RELEASES}/Elevateo-Posts-Setup.exe`,
+  mac:
+    process.env.NEXT_PUBLIC_DESKTOP_DOWNLOAD_MAC ||
+    `${RELEASES}/Elevateo-Posts.dmg`,
+};
 
 // Providers that persist a BYOK key (everything except the local proxy).
 const KEYED: Provider[] = ["openai", "anthropic", "gemini"];
@@ -355,7 +375,10 @@ export default function SettingsPage() {
                 {/* Body */}
                 <div className="px-5 pb-5 pt-4">
                   {provider.requiresDesktopApp || !keyed ? (
-                    <DesktopNotice />
+                    <LocalClaudeCard
+                      isActive={isActive}
+                      onUse={() => chooseActive(provider.id)}
+                    />
                   ) : (
                     <div className="flex flex-col gap-4">
                       {/* API key field */}
@@ -738,40 +761,159 @@ function ModelPicker({
   );
 }
 
-function DesktopNotice() {
-  return (
-    <div
-      className="flex items-start gap-3 rounded-lg border border-dashed p-4"
-      style={{ borderColor: "var(--chrome-border)" }}
-    >
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="mt-0.5 shrink-0 text-accent"
-        aria-hidden="true"
+/**
+ * The local Claude (Claude Code) provider card body. Only functional inside the
+ * desktop app (where the localhost proxy is reachable). Handles: detect
+ * desktop, check the proxy's Claude sign-in status, drive sign-in/out, and the
+ * "Use this" activation once signed in.
+ */
+function LocalClaudeCard({
+  isActive,
+  onUse,
+}: {
+  isActive: boolean;
+  onUse: () => void;
+}) {
+  // Read once at mount (lazy init keeps render pure). false on the server.
+  const [desktop] = useState<boolean>(() => isDesktopApp());
+  const [status, setStatus] = useState<ProxyAuthStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const s = await getProxyAuthStatus();
+    setStatus(s);
+  }, []);
+
+  useEffect(() => {
+    if (!desktop) return;
+    let active = true;
+    const tick = () => {
+      void getProxyAuthStatus().then((s) => {
+        if (active) setStatus(s);
+      });
+    };
+    tick(); // initial
+    // Poll so the card updates once the user finishes signing in.
+    const t = setInterval(tick, 3000);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
+  }, [desktop]);
+
+  // Not in the desktop app — explain it's desktop-only and offer the download.
+  if (desktop === false) {
+    return (
+      <div
+        className="rounded-lg border border-dashed p-4"
+        style={{ borderColor: "var(--chrome-border)" }}
       >
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="16" x2="12" y2="12" />
-        <line x1="12" y1="8" x2="12.01" y2="8" />
-      </svg>
-      <div className="text-xs leading-relaxed text-chrome-text">
-        <p className="font-medium text-chrome-text-strong">
-          Requires the Elevateo desktop app.
-        </p>
-        <p className="mt-1">
-          This routes generation through Claude Code running on your own
-          machine — no API key, no per-token cost. The web app can&apos;t reach{" "}
-          <code className="font-mono text-chrome-text-strong">localhost</code>,
-          so this option unlocks once you install the downloadable app.
-        </p>
-        <p className="mt-2 italic">Coming soon.</p>
+        <div className="flex items-start gap-3">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-accent" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          <div className="text-xs leading-relaxed text-chrome-text">
+            <p className="font-medium text-chrome-text-strong">
+              Download the desktop app to use this.
+            </p>
+            <p className="mt-1">
+              Runs generation through Claude on your own machine — no API key, no
+              per-token cost. The web app can&apos;t reach{" "}
+              <code className="font-mono text-chrome-text-strong">localhost</code>,
+              so this only works in the desktop app.
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 pl-7">
+          <a
+            href={DESKTOP_DOWNLOAD.windows}
+            className="rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-accent-text transition-colors hover:bg-accent-hover"
+          >
+            Download for Windows
+          </a>
+          <a
+            href={DESKTOP_DOWNLOAD.mac}
+            className="rounded-lg border border-chrome-border px-3.5 py-2 text-xs font-medium text-chrome-text-strong transition-colors hover:border-chrome-text"
+          >
+            Download for Mac
+          </a>
+        </div>
       </div>
+    );
+  }
+
+  if (status === null) {
+    return <Skeleton className="h-16 w-full" />;
+  }
+
+  // In the desktop app but the proxy isn't running.
+  if (!status.reachable) {
+    return (
+      <div className="rounded-lg border border-chrome-border bg-chrome p-4 text-xs text-chrome-text">
+        <p className="font-medium text-chrome-text-strong">Local proxy not running.</p>
+        <p className="mt-1">
+          The local Claude proxy didn&apos;t respond. Restart the desktop app and
+          try again.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {status.authenticated ? (
+        <div className="flex items-center justify-between rounded-lg border border-chrome-border bg-chrome px-4 py-3">
+          <span className="flex items-center gap-2 text-sm text-chrome-text-strong">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-success">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+            Signed in to Claude — no API key needed
+          </span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await proxyLogout();
+              await refresh();
+              setBusy(false);
+            }}
+            className="text-xs font-medium text-chrome-text transition-colors hover:text-error disabled:opacity-40"
+          >
+            Sign out
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-chrome-border bg-chrome px-4 py-3">
+          <p className="mb-2 text-xs text-chrome-text">
+            Sign in to your Claude account to generate with your subscription —
+            no API key, no per-token cost.
+          </p>
+          <button
+            type="button"
+            onClick={openProxyLogin}
+            className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-text transition-colors hover:bg-accent-hover"
+          >
+            Sign in to Claude
+          </button>
+        </div>
+      )}
+
+      {/* Use this provider — only once signed in. */}
+      <button
+        type="button"
+        onClick={onUse}
+        disabled={isActive || !status.authenticated}
+        className="self-start rounded-lg border px-3.5 py-2 text-xs font-semibold transition-all disabled:cursor-not-allowed"
+        style={{
+          borderColor: isActive || status.authenticated ? "var(--accent)" : "var(--chrome-border)",
+          color: isActive ? "var(--accent)" : status.authenticated ? "var(--accent-text)" : "oklch(45% 0.01 80)",
+          backgroundColor: isActive ? "oklch(80% 0.13 86 / 0.12)" : status.authenticated ? "var(--accent)" : "transparent",
+        }}
+      >
+        {isActive ? "✓ In use" : "Use this"}
+      </button>
     </div>
   );
 }
