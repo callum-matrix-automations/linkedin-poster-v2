@@ -13,6 +13,7 @@ React 19 / Tailwind 4**. The full creative loop works end to end.
 ### What exists
 
 **Flow:**
+
 1. **Onboarding** (6 steps) — builds a voice profile (name, title, industry,
    target audience, unique background, contrarian view, personal story, tone).
 2. **Find** (`/find`) — searches real LinkedIn posts via Apify, filters by
@@ -27,11 +28,13 @@ React 19 / Tailwind 4**. The full creative loop works end to end.
 6. **Feedback** — gold banner → modal → Telegram ping.
 
 **AI:** OpenAI `gpt-5.4-mini`. Three routes:
+
 - `/api/ai/generate-suggestions` (non-streaming) — profile + posts → 6 ideas
 - `/api/ai/generate-draft` (non-streaming) — profile + suggestion + posts → draft
 - `/api/ai/inline-edit` (streaming SSE) — selected text + action → replacement
 
 **External APIs:**
+
 - `/api/search-posts` → Apify actor `harvestapi~linkedin-post-search`
 - `/api/feedback` → Telegram Bot API
 
@@ -39,14 +42,14 @@ React 19 / Tailwind 4**. The full creative loop works end to end.
 
 ### Data persistence (all client-side localStorage)
 
-| Key | Shape |
-|-----|-------|
-| `linkedin-poster-profile` | UserProfile |
-| `linkedin-poster-search` | last SavedSearch (queries + posts) |
-| `linkedin-poster-drafts` | SavedDraft[] (in-progress) |
-| `linkedin-poster-history` | SavedDraft[] (finished) |
-| `linkedin-poster-draft-context` | DraftContext (inspiration posts) |
-| `linkedin-poster-current-draft` | string (unsaved draft text) |
+| Key                             | Shape                              |
+| ------------------------------- | ---------------------------------- |
+| `linkedin-poster-profile`       | UserProfile                        |
+| `linkedin-poster-search`        | last SavedSearch (queries + posts) |
+| `linkedin-poster-drafts`        | SavedDraft[] (in-progress)         |
+| `linkedin-poster-history`       | SavedDraft[] (finished)            |
+| `linkedin-poster-draft-context` | DraftContext (inspiration posts)   |
+| `linkedin-poster-current-draft` | string (unsaved draft text)        |
 
 **Zero server-side persistence. No database. No accounts.**
 
@@ -227,14 +230,14 @@ The intended direction for the product. Numbered as provided.
 - Mechanism: after a user connects LinkedIn (#6), periodically read back their
   own posts + engagement, store a per-user performance history, and feed the
   patterns into the `generate-suggestions` prompt (weight ideas toward what
-  has worked for *this* author and audience).
+  has worked for _this_ author and audience).
 - **Gating risk (important):** reading a member's own posts/analytics needs the
   **`r_member_social`** scope, which is **approval-gated** by LinkedIn (NOT
   self-serve like `w_member_social` posting). LinkedIn approval could be slow or
   denied — this is the main blocker, and the feature can't ship without it.
 - Storage: a per-user table of post performance snapshots (post URN, engagement
   counts, captured-at). Depends on auth + DB (already built).
-- Lower-effort precursor (no approval needed): tighten the *current*
+- Lower-effort precursor (no approval needed): tighten the _current_
   `generate-suggestions` prompt to explicitly analyze the engagement numbers it
   already receives — identify what made the top inspiration posts work (hook
   style, format, length, angle) and apply those patterns. Uses data we already
@@ -253,6 +256,10 @@ The intended direction for the product. Numbered as provided.
   cost that scales with how many topics/users we track. Needs storage of trend
   data over time and new UI. The most infrastructure-heavy of the idea features.
 - Depends on: backend scheduler (shared with #7), DB storage, Apify budget.
+
+### 10. More human-like responses.
+
+- Use the wiki workflow and weave it into the prompts
 
 ---
 
@@ -297,8 +304,8 @@ pointing at the same backend. This is the **Discord model**.
   scheduler/queue, user accounts, LinkedIn OAuth tokens, and post history. Always
   on. Owns all state.
 - **Web app** — the frontend, served from the Railway server. Runs in a browser.
-- **Desktop app (Electron)** — the *same* frontend, packaged as a downloadable
-  app, talking to the *same* Railway backend over HTTPS. Just like the Discord
+- **Desktop app (Electron)** — the _same_ frontend, packaged as a downloadable
+  app, talking to the _same_ Railway backend over HTTPS. Just like the Discord
   desktop client connects to Discord's servers.
 - Users can **download the desktop app directly from the web version**.
 
@@ -467,8 +474,7 @@ reconnect and re-post.
       (`prisma migrate deploy && next start`) so migrations apply on each boot,
       before the server accepts traffic.
 - [ ] Add the **cron service** (see above): second Railway service, start command
-      `node scripts/trigger-scheduled.mjs`, schedule `*/5 * * * *`, env `APP_URL`
-      + `CRON_SECRET`.
+      `node scripts/trigger-scheduled.mjs`, schedule `*/5 * * * *`, env `APP_URL` + `CRON_SECRET`.
 - [ ] Set `CRON_SECRET` on the **web** service too (the endpoint checks it).
 - [ ] Rotate any API keys that were pasted in dev chat (OpenAI, Apify) before
       going beyond private testing.
