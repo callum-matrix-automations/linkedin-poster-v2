@@ -44,8 +44,10 @@ jobs:
 
       - name: Build installer
         working-directory: electron
-        # CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from trying
-        # to find a macOS signing identity (we build unsigned on purpose).
+        # The mac build uses ad-hoc signing (identity "-" in package.json) so the
+        # app isn't kernel-rejected as "damaged" on Apple Silicon. We do NOT have
+        # a real Developer ID cert, so disable auto-discovery of one — the
+        # explicit "-" identity still ad-hoc signs.
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npm run ${{ matrix.target }}

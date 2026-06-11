@@ -46,7 +46,9 @@
       "category": "public.app-category.productivity",
       "icon": "icon.png",
       "artifactName": "Elevateo-Posts.${ext}",
-      "identity": null
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     }
   }
 }
