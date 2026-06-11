@@ -17,6 +17,7 @@
   "build": {
     "appId": "co.elevateo.posts",
     "productName": "Elevateo Posts",
+    "afterPack": "afterPack.js",
     "directories": {
       "output": "release"
     },
@@ -46,7 +47,7 @@
       "category": "public.app-category.productivity",
       "icon": "icon.png",
       "artifactName": "Elevateo-Posts.${ext}",
-      "identity": "-",
+      "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false
     }
