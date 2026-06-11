@@ -12,7 +12,7 @@
  * Unsigned build: first launch shows a one-time OS "unrecognized app" prompt.
  */
 
-const { app, BrowserWindow, shell, session } = require("electron");
+const { app, BrowserWindow, Menu, shell, session } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 
@@ -63,6 +63,7 @@ function createWindow() {
     minHeight: 600,
     title: "Elevateo Posts",
     backgroundColor: "#1a1a17",
+    icon: path.join(__dirname, "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -109,6 +110,11 @@ function allowLocalProxyRequests() {
 }
 
 app.whenReady().then(() => {
+  // Remove the native menu bar (File / Edit / View ...). On Windows/Linux this
+  // hides the bar entirely; on macOS a minimal app menu remains by OS
+  // convention (the menu bar there is system-wide, not in the window).
+  Menu.setApplicationMenu(null);
+
   startProxy();
   allowLocalProxyRequests();
   createWindow();

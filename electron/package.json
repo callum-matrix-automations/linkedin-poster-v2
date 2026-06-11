@@ -22,7 +22,8 @@
     },
     "files": [
       "main.js",
-      "preload.js"
+      "preload.js",
+      "icon.png"
     ],
     "extraResources": [
       {
@@ -33,6 +34,7 @@
     ],
     "win": {
       "target": "nsis",
+      "icon": "icon.png",
       "artifactName": "Elevateo-Posts-Setup.${ext}"
     },
     "nsis": {
@@ -42,6 +44,7 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.productivity",
+      "icon": "icon.png",
       "artifactName": "Elevateo-Posts.${ext}",
       "identity": null
     }
