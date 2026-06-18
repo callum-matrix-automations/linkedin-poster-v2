@@ -93,24 +93,47 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const userMessage = [
-      "Here is the user's profile:",
-      "",
-      buildUserContext(profile),
-      "",
-      "Here are inspiration posts to study for format and style:",
-      "",
-      buildInspirationContext(posts || []),
-      "",
-      "Write a LinkedIn post based on this idea:",
-      "",
-      `Title: ${suggestion.title}`,
-      `Hook angle: ${suggestion.hook}`,
-      `Approach: ${suggestion.angle}`,
-      `Type: ${suggestion.type}`,
-      "",
-      "Write the post now. Raw text only, no commentary.",
-    ].join("\n");
+    // A prompt-started draft carries the user's own brief. When present, the
+    // brief is the primary instruction — we lead with it rather than the
+    // synthesized suggestion fields. Inspiration posts are typically empty here.
+    const userMessage = suggestion.brief
+      ? [
+          "Here is the user's profile:",
+          "",
+          buildUserContext(profile),
+          ...(posts && posts.length
+            ? [
+                "",
+                "Here are inspiration posts to study for format and style:",
+                "",
+                buildInspirationContext(posts),
+              ]
+            : []),
+          "",
+          "The user wrote this brief describing the post they want. Treat it as the core instruction — write the post they're asking for, in their voice:",
+          "",
+          suggestion.brief,
+          "",
+          "Write the post now. Raw text only, no commentary.",
+        ].join("\n")
+      : [
+          "Here is the user's profile:",
+          "",
+          buildUserContext(profile),
+          "",
+          "Here are inspiration posts to study for format and style:",
+          "",
+          buildInspirationContext(posts || []),
+          "",
+          "Write a LinkedIn post based on this idea:",
+          "",
+          `Title: ${suggestion.title}`,
+          `Hook angle: ${suggestion.hook}`,
+          `Approach: ${suggestion.angle}`,
+          `Type: ${suggestion.type}`,
+          "",
+          "Write the post now. Raw text only, no commentary.",
+        ].join("\n");
 
     // Either calls the cloud provider here, or (for local Claude) returns a
     // deferral payload the desktop client runs against its local proxy.

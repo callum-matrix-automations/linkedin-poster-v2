@@ -10,7 +10,9 @@ import {
   deleteDraft,
   scheduleDraft,
   cancelScheduledDraft,
+  createPromptDraft,
 } from "@/lib/storage";
+import { NewPromptDialog } from "@/components/new-prompt-dialog";
 import { ScheduleDialog } from "@/components/schedule-dialog";
 import { formatInZone } from "@/lib/timezone";
 import { aiJsonRequest } from "@/lib/local-proxy-client";
@@ -726,11 +728,19 @@ function DraftList() {
   const { drafts, loading: draftsLoading, removeFromCache } = useDrafts();
   const { history, loading: historyLoading } = useHistory();
   const { scheduled, loading: scheduledLoading } = useScheduled();
+  const [showPrompt, setShowPrompt] = useState(false);
 
   async function handleDelete(id: string) {
     // Optimistically drop from the cache, then persist.
     removeFromCache(id);
     await deleteDraft(id);
+  }
+
+  // Start a draft from the user's own brief, then open the editor (which
+  // generates from the brief on load, since the new draft has empty content).
+  async function handleCreateFromPrompt(brief: string) {
+    const draft = await createPromptDraft(brief);
+    router.push(`/write?id=${draft.id}`);
   }
 
   // First load (no cached data yet) shows the ghost list.
@@ -753,13 +763,30 @@ function DraftList() {
   return (
     <div className="min-h-dvh bg-chrome px-6 py-12">
       <div className="mx-auto max-w-3xl">
-        <header className="mb-10">
-          <h1 className="mb-2 text-2xl font-semibold tracking-tight text-chrome-text-strong">
-            Your posts
-          </h1>
-          <p className="text-sm text-chrome-text">
-            Drafts in progress and your finished post history.
-          </p>
+        <header className="mb-10 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="mb-2 text-2xl font-semibold tracking-tight text-chrome-text-strong">
+              Your posts
+            </h1>
+            <p className="text-sm text-chrome-text">
+              Drafts in progress and your finished post history.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowPrompt(true)}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-text transition-all hover:bg-accent-hover"
+            style={{
+              transitionDuration: "var(--duration-fast)",
+              transitionTimingFunction: "var(--ease-out-expo)",
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+            Write from a prompt
+          </button>
         </header>
 
         <section className="mb-12">
@@ -772,16 +799,27 @@ function DraftList() {
                 No drafts yet
               </p>
               <p className="mb-4 text-sm text-chrome-text">
-                Find inspiring posts and generate an idea to start writing.
+                Write from your own prompt, or find inspiring posts to model an
+                idea off.
               </p>
-              <button
-                type="button"
-                onClick={() => router.push("/find")}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-text transition-colors hover:bg-accent-hover"
-                style={{ transitionDuration: "var(--duration-fast)" }}
-              >
-                Find posts
-              </button>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPrompt(true)}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-text transition-colors hover:bg-accent-hover"
+                  style={{ transitionDuration: "var(--duration-fast)" }}
+                >
+                  Write from a prompt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push("/find")}
+                  className="rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-chrome-text transition-colors hover:border-chrome-text hover:text-chrome-text-strong"
+                  style={{ transitionDuration: "var(--duration-fast)" }}
+                >
+                  Find posts
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col gap-2">
@@ -856,6 +894,13 @@ function DraftList() {
           </section>
         )}
       </div>
+
+      {showPrompt && (
+        <NewPromptDialog
+          onClose={() => setShowPrompt(false)}
+          onCreate={handleCreateFromPrompt}
+        />
+      )}
     </div>
   );
 }

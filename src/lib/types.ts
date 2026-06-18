@@ -59,6 +59,10 @@ export interface PostSuggestion {
   angle: string;
   type: "personal" | "topical";
   inspirationPostId?: string;
+  // When set, this draft was started from the user's own prompt rather than
+  // from searched inspiration. The brief is the primary instruction for
+  // generation and is reused on regenerate.
+  brief?: string;
 }
 
 export interface SavedDraft {

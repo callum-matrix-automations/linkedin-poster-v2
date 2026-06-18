@@ -111,6 +111,31 @@ export async function createDraft(
   return data.draft;
 }
 
+/**
+ * Create a draft from the user's own prompt (no inspiration search). The brief
+ * becomes the primary generation instruction; the suggestion fields are
+ * synthesized so the draft flows through the same machinery as search-started
+ * drafts. The title is a short label derived from the brief for the drafts list.
+ */
+export async function createPromptDraft(brief: string): Promise<SavedDraft> {
+  const trimmed = brief.trim();
+  // A readable label for the drafts list / editor header.
+  const firstLine = trimmed.split("\n")[0].trim();
+  const title =
+    firstLine.length > 60 ? firstLine.slice(0, 57).trimEnd() + "..." : firstLine || "Your idea";
+
+  const suggestion: SavedDraft["suggestion"] = {
+    title,
+    hook: "",
+    angle: trimmed,
+    // "personal" lets the writer weave in the user's background/voice.
+    type: "personal",
+    brief: trimmed,
+  };
+
+  return createDraft(suggestion, []);
+}
+
 /** Update a draft's content. */
 export async function updateDraftContent(
   id: string,

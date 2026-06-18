@@ -44,6 +44,8 @@ const createSchema = z.object({
     type: z.enum(["personal", "topical"]),
     // The AI returns null (not missing) when there's no inspiring post.
     inspirationPostId: z.string().nullable().optional(),
+    // Set when the draft was started from the user's own prompt.
+    brief: z.string().optional(),
   }),
   inspirationPosts: z.array(z.any()).default([]),
   content: z.string().default(""),
